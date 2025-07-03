@@ -1,0 +1,13 @@
+name = "AdaSubGram"
+uuid = "39de99ea-98e8-4abf-a19e-a1c61e6261d6"
+authors = ["Atour Mousavi Gourabi"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.6.7"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
