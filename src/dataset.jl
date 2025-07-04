@@ -1,5 +1,6 @@
 module Dataset
 
+using Random
 using Unicode
 
 """
@@ -29,13 +30,13 @@ function assign_labels!(document::Vector{String}, labels::Dict{String, UInt64}, 
 end
 
 """
-    pair_contexts(document::Vector{UInt64}, c::UInt8) -> Vector{Tuple{UInt64, Vector{UInt64}}}
+    pair_contexts(document::Vector{UInt64}, c::Int64) -> Vector{Tuple{UInt64, Vector{UInt64}}}
 
 Creates token to context window pairings from
 the list of integer labels. The context size c
 is used symmetrically, to index-c and index+c.
 """
-function pair_contexts(document::Vector{UInt64}, c::UInt8)::Vector{Tuple{UInt64, Vector{UInt64}}}
+function pair_contexts(document::Vector{UInt64}, c::Int64)::Vector{Tuple{UInt64, Vector{UInt64}}}
   contexts = Vector{Tuple{UInt64, Vector{UInt64}}}(undef, length(document))
   for (i, token) in enumerate(document)
     start = max(i - c, 1)
@@ -66,6 +67,39 @@ function split_subwords(word::String, s_min::Int64, s_max::Int64)::Vector{String
   return n_grams
 end
 
-export assign_labels!, pair_contexts, split_subwords
+"""
+    create_dataset(documents::Vector{Vector{String}}, c::Int64, s_min::Int64, s_max::Int64, n::UInt32, max_unique_words::UInt64) -> Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}
+
+Creates a dataset from a collection of documents.
+Assumes the documents have already been preprocessed.
+Creates context pairs with a context size of c,
+subwords are constructed of ngrams with sizes between
+s_min and s_max (inclusive). The hashing cutoff n
+truncates the subword hashes. The max_unique_words
+parameter ensures we can allocate the tracking data
+structures beforehand, avoiding expensive resizing.
+"""
+function create_dataset(documents::Vector{Vector{String}}, c::Int64, s_min::Int64, s_max::Int64, n::UInt32, max_unique_words::UInt64=UInt64(1_000_000))::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}
+  labels = Dict{String, UInt64}()
+  words = Vector{String}(undef, max_unique_words)
+  counts = Vector{Int64}(undef, max_unique_words)
+  count = UInt64(1)
+  context_pair_documents = Vector{Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}}(undef, length(documents))
+  for (i, document) in enumerate(documents)
+    labelled_document, count = assign_labels!(document, labels, words, counts, count)
+    context_pair_document = pair_contexts(labelled_document, c)
+    context_subword_document = Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}(undef, length(context_pair_document))
+    for (j, word, context) in enumerate(context_pair_document)
+      subwords = hash_words(split_subwords(words[word], s_min, s_max), n)
+      context_subword_document[j] = (word, subwords, context)
+    end
+    context_pair_documents[i] = context_subword_document
+  end
+  dataset = vcat(context_pair_documents...)
+  shuffle!(dataset)
+  return dataset
+end
+
+export create_dataset
 
 end

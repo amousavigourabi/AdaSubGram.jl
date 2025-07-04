@@ -24,10 +24,10 @@ end
 end
 
 @testset "Pair contexts" begin
-  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1, 2, 3], UInt8(1)) == [(0, [1]), (1, [0, 2]), (2, [1, 3]), (3, [2])]
-  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1], UInt8(1)) == [(0, [1]), (1, [0])]
-  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1], UInt8(0)) == [(0, []), (1, [])]
-  @test AdaSubGram.Dataset.pair_contexts(UInt64[0], UInt8(1)) == [(0, [])]
-  @test AdaSubGram.Dataset.pair_contexts(UInt64[], UInt8(1)) == []
-  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1, 0, 2, 3, 5], UInt8(2)) == [(0, [1, 0]), (1, [0, 0, 2]), (0, [0, 1, 2, 3]), (2, [1, 0, 3, 5]), (3, [0, 2, 5]), (5, [2, 3])]
+  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1, 2, 3], 1) == [(0, [1]), (1, [0, 2]), (2, [1, 3]), (3, [2])]
+  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1], 1) == [(0, [1]), (1, [0])]
+  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1], 0) == [(0, []), (1, [])]
+  @test AdaSubGram.Dataset.pair_contexts(UInt64[0], 1) == [(0, [])]
+  @test AdaSubGram.Dataset.pair_contexts(UInt64[], 1) == []
+  @test AdaSubGram.Dataset.pair_contexts(UInt64[0, 1, 0, 2, 3, 5], 2) == [(0, [1, 0]), (1, [0, 0, 2]), (0, [0, 1, 2, 3]), (2, [1, 0, 3, 5]), (3, [0, 2, 5]), (5, [2, 3])]
 end

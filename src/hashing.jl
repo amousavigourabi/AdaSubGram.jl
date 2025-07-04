@@ -5,6 +5,12 @@ module Hashing
 
 Hashes the word to a 32-bit space,
 using the FNV 1A hashing algorithm.
+Shifts the output by one to ensure
+we can always index arrays. This
+means that n=2_000_000 will ensure
+the result is included in the range
+[1, 2_000_000], instead of the
+range [0, 1_999_999].
 """
 function fnv_1a_hash(word::String, n::UInt32)::UInt32
   offset = UInt32(2166136261)
@@ -14,7 +20,7 @@ function fnv_1a_hash(word::String, n::UInt32)::UInt32
     hash = hash ⊻ UInt32(byte)
     hash = hash * prime
   end
-  return hash % n
+  return hash % n + 1
 end
 
 """
