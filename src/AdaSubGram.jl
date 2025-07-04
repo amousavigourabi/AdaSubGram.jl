@@ -4,7 +4,9 @@ include("./hashing.jl")
 include("./preprocessing.jl")
 include("./dataset.jl")
 include("./model.jl")
+include("./hierarchical_softmax.jl")
 
-# Write your package code here.
+function adaskipgram()
+end
 
 end

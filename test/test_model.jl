@@ -12,8 +12,7 @@
     @test all(-0.5 / dims - ϵ .<= model.in_subwords .<= 0.5 / dims + ϵ)
     @test all(-0.5 / dims - ϵ .<= model.in_senses .<= 0.5 / dims + ϵ)
     @test all(-0.5 / dims - ϵ .<= model.out .<= 0.5 / dims + ϵ)
-    @test all(model.as[:, 1] - word_counts .== 1.0)
-    @test all(model.as[:, 2:senses] .== 1.0)
-    @test all(model.bs .== alpha)
+    @test all(model.ns[:, 1] .== word_counts)
+    @test all(model.ns[:, 2:senses] .== 0.0)
   end
 end

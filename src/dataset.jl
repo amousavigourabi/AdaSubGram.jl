@@ -39,9 +39,7 @@ is used symmetrically, to index-c and index+c.
 function pair_contexts(document::Vector{UInt64}, c::Int64)::Vector{Tuple{UInt64, Vector{UInt64}}}
   contexts = Vector{Tuple{UInt64, Vector{UInt64}}}(undef, length(document))
   for (i, token) in enumerate(document)
-    start = max(i - c, 1)
-    final = min(i + c, length(document))
-    context = document[[start:(i-1); (i+1):final]]
+    context = document[[max(i - c, 1):(i-1); (i+1):min(i + c, end)]]
     contexts[i] = (token, context)
   end
   return contexts
@@ -95,9 +93,20 @@ function create_dataset(documents::Vector{Vector{String}}, c::Int64, s_min::Int6
     end
     context_pair_documents[i] = context_subword_document
   end
-  dataset = vcat(context_pair_documents...)
+  return vcat(context_pair_documents...)
+end
+
+"""
+    minibatches(dataset::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, batch_size::Int64)::Vector{Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}}
+
+Split up the dataset into minibatches
+of size batch_size. Shuffles the
+dataset first, to ensure it varies
+throughout the training loop.
+"""
+function minibatches(dataset::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, batch_size::Int64)::Vector{Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}}
   shuffle!(dataset)
-  return dataset
+  return [dataset[i:min(i+batch_size-1, end)] for i in 1:batch_size:length(dataset)]
 end
 
 export create_dataset
