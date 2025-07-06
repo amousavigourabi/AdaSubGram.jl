@@ -2,6 +2,7 @@ module Dataset
 
 using Random
 using Unicode
+using AdaSubGram
 
 """
     assign_labels!(document::Vector{String}, labels::Dict{String, UInt64}, words::Vector{String}, counts::Vector{UInt64}, current_label::UInt64) -> Tuple{Vector{UInt64}, UInt64}
@@ -77,23 +78,23 @@ truncates the subword hashes. The max_unique_words
 parameter ensures we can allocate the tracking data
 structures beforehand, avoiding expensive resizing.
 """
-function create_dataset(documents::Vector{Vector{String}}, c::Int64, s_min::Int64, s_max::Int64, n::UInt32, max_unique_words::UInt64=UInt64(1_000_000))::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}
+function create_dataset(documents::Vector{Vector{String}}, c::Int64, s_min::Int64, s_max::Int64, n::UInt32, max_unique_words::UInt64=UInt64(1_000_000))::Tuple{Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, Vector{UInt64}}
   labels = Dict{String, UInt64}()
   words = Vector{String}(undef, max_unique_words)
-  counts = Vector{Int64}(undef, max_unique_words)
+  counts = Vector{UInt64}(undef, max_unique_words)
   count = UInt64(1)
   context_pair_documents = Vector{Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}}(undef, length(documents))
   for (i, document) in enumerate(documents)
     labelled_document, count = assign_labels!(document, labels, words, counts, count)
     context_pair_document = pair_contexts(labelled_document, c)
     context_subword_document = Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}(undef, length(context_pair_document))
-    for (j, word, context) in enumerate(context_pair_document)
-      subwords = hash_words(split_subwords(words[word], s_min, s_max), n)
+    for (j, (word, context)) in enumerate(context_pair_document)
+      subwords = AdaSubGram.Hashing.hash_words(split_subwords(words[word], s_min, s_max), n)
       context_subword_document[j] = (word, subwords, context)
     end
     context_pair_documents[i] = context_subword_document
   end
-  return vcat(context_pair_documents...)
+  return vcat(context_pair_documents...), counts
 end
 
 """
@@ -109,6 +110,6 @@ function minibatches(dataset::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64
   return [dataset[i:min(i+batch_size-1, end)] for i in 1:batch_size:length(dataset)]
 end
 
-export create_dataset
+export create_dataset, minibatches
 
 end
