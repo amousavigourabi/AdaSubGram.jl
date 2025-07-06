@@ -14,28 +14,3 @@
     @test all(model.ns[:, 2:senses] .== 0.0)
   end
 end
-
-const documents=[
-  "The happy fox jumped over the river.",
-  "STATELY, PLUMP BUCK MULLIGAN CAME FROM THE STAIRHEAD, bearing a bowl of lather on which a mirror and a razor lay crossed. A yellow dressing gown, ungirdled, was sustained gently-behind him by the mild morning air. He held the bowl aloft and intoned:",
-  "No way mate, that's absolutely insane!"
-]
-
-@testset "SCRATCH TRAIN" begin
-  dims = 3
-  α = 0.5f0
-  λ = 0.05f0
-  senses = 6
-  context = 5
-  subword_truncation = 10_000
-  s_min = 4
-  s_max = 7
-  batch_size = 32
-  epochs = 100
-  normalized_documents = AdaSubGram.Preprocessing.normalize.(documents)
-  tokenized_documents = AdaSubGram.Preprocessing.tokenize.(normalized_documents)
-  dataset, counts = AdaSubGram.Dataset.create_dataset(tokenized_documents, context, s_min, s_max, UInt32(subword_truncation), UInt64(1_000))
-  nodes, decisions = AdaSubGram.HuffmanTree.huffman_paths(counts)
-  model = AdaSubGram.Model.initialize(dims, counts, subword_truncation, senses)
-  AdaSubGram.Model.train(model, dataset, collect(zip(nodes, decisions)), batch_size, epochs, α, λ)
-end
