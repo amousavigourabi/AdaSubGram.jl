@@ -32,20 +32,37 @@ function construct_tree(freqs::Vector{UInt64})::HuffmanNode
   return pop!(pq)[2]
 end
 
-function extract_codes!(node::HuffmanNode, codes::Vector{Vector{Int32}}, decisions::Vector{Vector{Float32}}, node_ids::Dict{HuffmanNode, Int64}, prefix::Vector{Int32}, decision_prefix::Vector{Float32})::Nothing
-  if node isa HuffmanLeaf
-    codes[node.symbol] = deepcopy(prefix)
-    decisions[node.symbol] = deepcopy(decision_prefix)
-  elseif node isa HuffmanInternal
-    push!(prefix, node_ids[node])
-    push!(decision_prefix, 1.0f0)
-    extract_codes!(node.left, codes, decisions, node_ids, prefix, decision_prefix)
-    pop!(decision_prefix)
-    push!(decision_prefix, 0.0f0)
-    extract_codes!(node.right, codes, decisions, node_ids, prefix, decision_prefix)
-    pop!(decision_prefix)
-    pop!(prefix)
+function extract_codes!(root::HuffmanNode, codes::Vector{Vector{Int32}}, decisions::Vector{Vector{Float32}}, node_ids::Dict{HuffmanNode, Int64})::Nothing
+  node_queue = Deque{Tuple{HuffmanNode, Vector{Int32}, Vector{Float32}}}()
+  push!(node_queue, (root, Int32[], Float32[]))
+  while !isempty(node_queue)
+    node, prefix, decision_prefix = popfirst!(node_queue)
+    if node isa HuffmanLeaf
+      codes[node.symbol] = deepcopy(prefix)
+      decisions[node.symbol] = deepcopy(decision_prefix)
+    elseif node isa HuffmanInternal
+      prefix = deepcopy(prefix)
+      decision_prefix_one = deepcopy(decision_prefix)
+      push!(prefix, node_ids[node])
+      push!(decision_prefix_one, 1.0f0)
+      push!(node_queue, (node.left, prefix, decision_prefix_one))
+      push!(decision_prefix, 0.0f0)
+      push!(node_queue, (node.right, prefix, decision_prefix))
+    end
   end
+  # if node isa HuffmanLeaf
+  #   codes[node.symbol] = deepcopy(prefix)
+  #   decisions[node.symbol] = deepcopy(decision_prefix)
+  # elseif node isa HuffmanInternal
+  #   push!(prefix, node_ids[node])
+  #   push!(decision_prefix, 1.0f0)
+  #   extract_codes!(node.left, codes, decisions, node_ids, prefix, decision_prefix)
+  #   pop!(decision_prefix)
+  #   push!(decision_prefix, 0.0f0)
+  #   extract_codes!(node.right, codes, decisions, node_ids, prefix, decision_prefix)
+  #   pop!(decision_prefix)
+  #   pop!(prefix)
+  # end
   return nothing
 end
 
@@ -81,7 +98,7 @@ function huffman_paths(counts::Vector{UInt64})::Tuple{Vector{Vector{Int32}}, Vec
   node_ids = build_node_ids(tree)
   nodes = Vector{Vector{Int32}}(undef, length(counts))
   decisions = Vector{Vector{Float32}}(undef, length(counts))
-  extract_codes!(tree, nodes, decisions, node_ids, Int32[], Float32[])
+  extract_codes!(tree, nodes, decisions, node_ids)
   return nodes, decisions
 end
 

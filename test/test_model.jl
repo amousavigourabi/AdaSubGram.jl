@@ -14,3 +14,7 @@
     @test all(model.ns[:, 2:senses] .== 0.0)
   end
 end
+
+@testset "HAHA" begin
+  AdaSubGram.create_encodings("C:\\Users\\atour\\Downloads\\dataset.txt", "")
+end
