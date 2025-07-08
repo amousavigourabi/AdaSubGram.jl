@@ -121,7 +121,6 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds max_sense = maximum(sense_likelihoods[:, j])
         @views @inbounds sense_likelihoods[:, j] .-= max_sense + log(sum(exp.(sense_likelihoods[:, j] .- max_sense)))
         @views @inbounds sense_likelihoods[:, j] .= exp.(sense_likelihoods[:, j])
-        @views @inbounds sense_likelihoods[:, j] ./= sum(sense_likelihoods[:, j])
         for sense in 1:num_senses
           for context_word in context
             # TODO fix these gradients
