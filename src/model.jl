@@ -112,18 +112,18 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
           @inbounds sense_likelihoods[sense, j] = logbeta_k + logbeta_complements
         end
         for context_word in context
-          for n in paths[context_word][1]
-            @views @inbounds sense_likelihoods[:, j] .+= output[:, n]
-            @views @inbounds max_output = maximum(output[:, n])
-            @views @inbounds sense_likelihoods[:, j] .-= max_output + log(sum(exp.(output[:, n] .- max_output)))
-          end
+          @inbounds nodes, _ = paths[context_word]
+          @views @inbounds sense_likelihoods[:, j] .+= sum(output[:, nodes])
+          @views @inbounds max_outputs = maximum(output[:, nodes], dims=1)
+          @views @inbounds sense_likelihoods[:, j] .-= sum(max_outputs .+ log.(sum(exp.(output[:, nodes] .- max_outputs), dims=1)))
         end
         @views @inbounds max_sense = maximum(sense_likelihoods[:, j])
         @views @inbounds sense_likelihoods[:, j] .-= max_sense + log(sum(exp.(sense_likelihoods[:, j] .- max_sense)))
         @views @inbounds sense_likelihoods[:, j] .= exp.(sense_likelihoods[:, j])
         for sense in 1:num_senses
           for context_word in context
-            # TODO fix these gradients
+            # TODO vectorize senses
+            # TODO column access optimizations
             @inbounds nodes, decisions = paths[context_word]
             @views @inbounds results = σ.(output[sense, nodes])
             @views δs = ((1 .- results) .* (1 .- 2 .* decisions))'
