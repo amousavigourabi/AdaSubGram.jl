@@ -32,7 +32,7 @@ function initialize(vector_dims::Int64, word_counts::Vector{UInt64}, input_subwo
 end
 
 function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, scaled_latent::AbstractArray{Float32, 2}, norm_model_out::AbstractArray{Float32, 2}, scale_out::Float32)::Tuple{Array{Float32, 2}, Array{Float32, 2}}
-  @views @inbounds latent = model.in_senses[input_word, :, :]' .+ sum(model.in_subwords[input_subwords, :], dims=1) # make into model.in_subwords[:, input_subwords]!
+  @views @inbounds latent .= model.in_senses[input_word, :, :]' .+ sum(model.in_subwords[input_subwords, :], dims=1) # make into model.in_subwords[:, input_subwords]!
   scaled_latent .= latent .* scale_out
   mul!(output, scaled_latent, norm_model_out)
   return latent, output
