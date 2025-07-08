@@ -33,8 +33,10 @@ end
 
 function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, scaled_latent::AbstractArray{Float32, 2}, norm_model_out::AbstractArray{Float32, 2}, scale_out::Float32)::Tuple{Array{Float32, 2}, Array{Float32, 2}}
   @views @inbounds latent .= model.in_senses[input_word, :, :]' .+ sum(model.in_subwords[input_subwords, :], dims=1) # make into model.in_subwords[:, input_subwords]!
-  scaled_latent .= latent .* scale_out
-  mul!(output, scaled_latent, norm_model_out)
+  scale_latent = mapreduce(abs, max, latent)
+  scaled_latent .= latent ./ scale_latent
+  mul!(output, latent, norm_model_out)
+  mul!(output, scale_latent * scale_out, output)
   return latent, output
 end
 
@@ -111,16 +113,18 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         end
         for context_word in context
           for n in paths[context_word][1]
-            @inbounds @views sense_likelihoods[:, j] .+= output[:, n]
+            @views @inbounds sense_likelihoods[:, j] .+= output[:, n]
+            @views @inbounds max_output = maximum(output[:, n])
+            @views @inbounds sense_likelihoods[:, j] .-= max_output + log(sum(exp.(output[:, n] .- max_output)))
           end
         end
-        @views @inbounds clamp!(sense_likelihoods[:, j], -80, 80)
+        @views @inbounds max_sense = maximum(sense_likelihoods[:, j])
+        @views @inbounds sense_likelihoods[:, j] .-= max_sense + log(sum(exp.(sense_likelihoods[:, j] .- max_sense)))
         @views @inbounds sense_likelihoods[:, j] .= exp.(sense_likelihoods[:, j])
-        @views @inbounds totals = sum(sense_likelihoods[:, j])
-        @views @inbounds sense_likelihoods[:, j] ./= totals
+        @views @inbounds sense_likelihoods[:, j] ./= sum(sense_likelihoods[:, j])
         for sense in 1:num_senses
           for context_word in context
-            # TODO optimize these gradients
+            # TODO fix these gradients
             @inbounds for (n, d) in zip(paths[context_word]...)
               @views @inbounds z = model.out[:, n] .* latent[sense, :] # make into latent[:, sense], reshape the latent thing!
               p = σ.(z)
