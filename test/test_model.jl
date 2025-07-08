@@ -10,11 +10,11 @@
     @test all(-0.5 / dims - ϵ .<= model.in_subwords .<= 0.5 / dims + ϵ)
     @test all(-0.5 / dims - ϵ .<= model.in_senses .<= 0.5 / dims + ϵ)
     @test all(-0.5 / dims - ϵ .<= model.out .<= 0.5 / dims + ϵ)
-    @test all(model.ns[:, 1] .== word_counts)
-    @test all(model.ns[:, 2:senses] .== 0.0)
+    @test all(model.ns[1, :] .== word_counts)
+    @test all(model.ns[2:senses, :] .== 0.0)
   end
 end
 
 # @testset "HAHA" begin
-#   AdaSubGram.create_encodings("C:\\Users\\atour\\Downloads\\dataset.txt", "")
+#   AdaSubGram.create_encodings("C:\\Users\\atour\\Downloads\\dataset.txt", "C:\\Users\\atour\\Downloads\\results.vec")
 # end
