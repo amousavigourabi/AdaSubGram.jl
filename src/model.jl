@@ -124,23 +124,18 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         for sense in 1:num_senses
           for context_word in context
             # TODO fix these gradients
-            @inbounds for (n, d) in zip(paths[context_word]...)
-              @views @inbounds z = model.out[:, n] .* latent[sense, :] # make into latent[:, sense], reshape the latent thing!
-              p = σ.(z)
-              δ = p .- d
-              @views @inbounds ∇out[:, n] .+= δ .* latent[sense, :] # make into latent[:, sense], reshape the latent thing!
-              @views @inbounds ∇h[:, sense] .+= δ .* model.out[:, n]
-            end
+            @inbounds nodes, decisions = paths[context_word]
+            @views @inbounds results = σ.(output[sense, nodes])
+            @views δs = ((1 .- results) .* (1 .- 2 .* decisions))'
+            @inbounds ∇out[:, nodes] .+= latent[sense, :] .* δs
+            @views @inbounds ∇h[:, sense] .= sum(model.out[:, nodes] .* δs, dims=2)
             @views @inbounds ∇in_senses[word, :, sense] .+= sense_likelihoods[sense, j] .* ∇h[:, sense] # ∇in_senses as [h, sense, word]
             @views @inbounds ∇in_subwords[subwords, :] .+= sense_likelihoods[sense, j] .* reshape(∇h[:, sense], 1, :) # make into ∇in_subwords[:, subwords], reshape the ∇in_subwords thing!
-            @views @inbounds results = σ.(output[sense, paths[context_word][1]])
-            @inbounds targets = paths[context_word][2]
-            L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, targets)
+            L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)
           end
         end
-        @views @inbounds ∇in_senses[word, :, :] .*= sense_likelihoods[:, j]' # ∇in_senses as [h, sense, word]
       end
-      scaling_factor = length(training_data) / length(minibatch)
+      scaling_factor = length(training_data) / length(minibatch) / 40000
       L += λ / scaling_factor * (norm(model.out) + norm(model.in_senses) + norm(model.in_subwords))
       η = 0.025 * (1 - epoch / epochs)
       ρ = η * scaling_factor
