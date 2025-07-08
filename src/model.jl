@@ -32,11 +32,9 @@ function initialize(vector_dims::Int64, word_counts::Vector{UInt64}, input_subwo
   return model
 end
 
-function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, scaled_latent::AbstractArray{Float32, 2}, norm_model_out::AbstractArray{Float32, 2})::Tuple{Array{Float32, 2}, Array{Float32, 2}}
+function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, scaled_latent::AbstractArray{Float32, 2}, norm_model_out::AbstractArray{Float32, 2}, scale_out::Float32)::Tuple{Array{Float32, 2}, Array{Float32, 2}}
   @views @inbounds latent = model.in_senses[input_word, :, :]' .+ sum(model.in_subwords[input_subwords, :], dims=1) # make into model.in_subwords[:, input_subwords]!
-  scale_out = mapreduce(abs, max, model.out)
   scaled_latent .= latent .* scale_out
-  norm_model_out .= model.out ./ scale_out # TODO calculate this after every update
   mul!(output, scaled_latent, norm_model_out)
   return latent, output
 end
@@ -86,7 +84,8 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   latent = zeros(Float32, model.senses, size(∇in_subwords)[2])
   output = zeros(Float32, model.senses, size(∇out)[2])
   latent_scaled = zeros(Float32, model.senses, size(∇in_subwords)[2])
-  out_scaled = zeros(Float32, size(model.out)) # TODO compute scalar at every update
+  scale_out = mapreduce(abs, max, model.out)
+  out_scaled = deepcopy(model.out) ./ scale_out
   for epoch in 1:epochs
     L = 0
     minibatches = AdaSubGram.Dataset.minibatches(training_data, batch_size)
@@ -99,7 +98,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       fill!(∇in_subwords, 0.0f0)
       sense_likelihoods = zeros(Float32, model.senses, length(minibatch))
       for (j, (word, subwords, context)) in enumerate(minibatch)
-        @views forward_pass!(model, word, subwords, latent, output, latent_scaled, out_scaled)
+        @views forward_pass!(model, word, subwords, latent, output, latent_scaled, out_scaled, scale_out)
         @inbounds @views as, bs = compute_beta_parameters(model.ns[:, word], α)
         for sense in 1:model.senses
           @inbounds ϝs[sense] = digamma(as[sense] + bs[sense])
@@ -127,14 +126,14 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
               @views @inbounds ∇out[:, n] .+= δ .* latent[sense, :] # make into latent[:, sense], reshape the latent thing!
               @views @inbounds ∇h[:, sense] .+= δ .* model.out[:, n]
             end
-            @views @inbounds ∇in_senses[word, :, sense] .+= sense_likelihoods[sense, j] .* ∇h[:, sense]
+            @views @inbounds ∇in_senses[word, :, sense] .+= sense_likelihoods[sense, j] .* ∇h[:, sense] # ∇in_senses as [h, sense, word]
             @views @inbounds ∇in_subwords[subwords, :] .+= sense_likelihoods[sense, j] .* reshape(∇h[:, sense], 1, :) # make into ∇in_subwords[:, subwords], reshape the ∇in_subwords thing!
             @views @inbounds results = σ.(output[sense, paths[context_word][1]])
             @inbounds targets = paths[context_word][2]
             L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, targets)
           end
         end
-        @views @inbounds ∇in_senses[word, :, :] .*= sense_likelihoods[:, j]'
+        @views @inbounds ∇in_senses[word, :, :] .*= sense_likelihoods[:, j]' # ∇in_senses as [h, sense, word]
       end
       scaling_factor = length(training_data) / length(minibatch)
       L += λ / scaling_factor * (norm(model.out) + norm(model.in_senses) + norm(model.in_subwords))
@@ -146,6 +145,8 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       @views model.out .-= ρ .* ∇out .+ λ .* model.out
       @views model.in_senses .-= ρ .* ∇in_senses .+ λ .* model.in_senses
       @views model.in_subwords .-= ρ .* ∇in_subwords .+ λ .* model.in_subwords
+      scale_out = mapreduce(abs, max, model.out)
+      out_scaled .= model.out ./ scale_out
     end
     L /= length(training_data)
     finish!(progress)
