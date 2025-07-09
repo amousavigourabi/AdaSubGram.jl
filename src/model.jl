@@ -105,7 +105,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
           @views @inbounds logbeta_complements = sum(bϝs[1:(sense-1)])
           @inbounds sense_likelihoods[sense, j] = logbeta_k + logbeta_complements
         end
-        for context_word in context
+        @simd for context_word in context
           @inbounds nodes, _ = paths[context_word]
           @views @inbounds sense_likelihoods[:, j] .+= sum(output[nodes, :])
           @views @inbounds max_outputs = maximum(output[nodes, :], dims=1)
@@ -114,19 +114,16 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds max_sense = maximum(sense_likelihoods[:, j])
         @views @inbounds sense_likelihoods[:, j] .-= max_sense + log(sum(exp.(sense_likelihoods[:, j] .- max_sense)))
         @views @inbounds sense_likelihoods[:, j] .= exp.(sense_likelihoods[:, j])
-        for sense in 1:num_senses
-          for context_word in context
-            # TODO vectorize senses
-            # TODO ∇in_senses as [dims, word, sense]
-            @inbounds nodes, decisions = paths[context_word]
-            @views @inbounds results = σ.(output[nodes, sense])
-            @views δs = ((1 .- results) .* (1 .- 2 .* decisions))'
-            @inbounds ∇out[:, nodes] .+= latent[:, sense] .* δs
-            @views @inbounds ∇h[:, sense] .= sum(model.out[:, nodes] .* δs, dims=2)
-            @views @inbounds ∇in_senses[:, sense, word] .+= sense_likelihoods[sense, j] .* ∇h[:, sense]
-            @views @inbounds ∇in_subwords[:, subwords] .+= sense_likelihoods[sense, j] .* ∇h[:, sense]
-            L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)
-          end
+        @simd for context_word in context
+          # TODO ∇in_senses as [dims, word, sense]
+          @inbounds nodes, decisions = paths[context_word]
+          @views @inbounds results = σ.(output[nodes, :])
+          @views δs = ((1 .- results) .* (1 .- 2 .* decisions))'
+          @views @inbounds mul!(∇out[:, nodes], latent, δs, 1, 1)
+          @views @inbounds ∇h .= dropdims(sum(reshape(δs, length(nodes), 1, 6) .* reshape(model.out[:, nodes], length(nodes), 50, 1), dims=1), dims=1) .* sense_likelihoods[:, j]'
+          @views @inbounds ∇in_senses[:, :, word] .+= ∇h
+          @views @inbounds ∇in_subwords[:, subwords] .+= sum(∇h, dims=2)
+          L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)
         end
       end
       scaling_factor = length(training_data) / length(minibatch) / 40000

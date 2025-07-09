@@ -64,11 +64,14 @@ function huffman_paths(counts::Vector{UInt64})::Tuple{Vector{Vector{Int32}}, Vec
   return nodes, decisions
 end
 
-function hierarchical_softmax_loss(results::Vector{Float32}, targets::Vector{Float32})::Float64
+function hierarchical_softmax_loss(results::Array{Float32, 2}, targets::Vector{Float32})::Float64
   ϵ = 1e-7
   ℓ = 0.0
-  for (p, d) in zip(results, targets)
-    ℓ -= d * log(p + ϵ) + (1 - d) * log(1 - p + ϵ)
+  _, amount_of_results = size(results)
+  for i in 1:amount_of_results
+    for (p, d) in zip(results[:, i], targets)
+      ℓ -= d * log(p + ϵ) + (1 - d) * log(1 - p + ϵ)
+    end
   end
   return ℓ
 end
