@@ -31,9 +31,9 @@ function initialize(vector_dims::Int64, word_counts::Vector{UInt64}, input_subwo
   return model
 end
 
-function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, norm_model_out::AbstractArray{Float32, 2}, scale_out::Float32)::Nothing
+function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, model_out::AbstractArray{Float32, 2})::Nothing
   @views @inbounds latent .= model.in_senses[:, :, input_word] .+ sum(model.in_subwords[:, input_subwords], dims=2)
-  mul!(output, norm_model_out', latent)
+  mul!(output, model_out', latent)
   mul!(output, scale_out, output)
   return nothing
 end
@@ -84,8 +84,6 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   ∇in_subwords = zeros(Float32, size(model.in_subwords))
   latent = zeros(Float32, num_dims, num_senses)
   output = zeros(Float32, num_out, num_senses)
-  scale_out = mapreduce(abs, max, model.out)
-  out_scaled = deepcopy(model.out) ./ scale_out
   for epoch in 1:epochs
     L = 0
     minibatches = AdaSubGram.Dataset.minibatches(training_data, batch_size)
@@ -99,7 +97,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       fill!(∇in_subwords, 0.0f0)
       fill!(sense_likelihoods, 0.0f0)
       for (j, (word, subwords, context)) in enumerate(minibatch)
-        @views forward_pass!(model, word, subwords, latent, output, out_scaled, scale_out)
+        @views forward_pass!(model, word, subwords, latent, output, model.out)
         @inbounds @views as, bs = compute_beta_parameters(model.ns[:, word], α)
         for sense in 1:num_senses
           @inbounds ϝs[sense] = digamma(as[sense] + bs[sense])
@@ -141,8 +139,6 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       @views model.out .-= ρ .* ∇out .+ λ .* model.out
       @views model.in_senses .-= ρ .* ∇in_senses .+ λ .* model.in_senses
       @views model.in_subwords .-= ρ .* ∇in_subwords .+ λ .* model.in_subwords
-      scale_out = mapreduce(abs, max, model.out)
-      out_scaled .= model.out ./ scale_out
     end
     L /= length(training_data)
     finish!(progress)
