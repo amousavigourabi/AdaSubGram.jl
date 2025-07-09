@@ -34,7 +34,6 @@ end
 function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, model_out::AbstractArray{Float32, 2})::Nothing
   @views @inbounds latent .= model.in_senses[:, :, input_word] .+ sum(model.in_subwords[:, input_subwords], dims=2)
   mul!(output, model_out', latent)
-  mul!(output, scale_out, output)
   return nothing
 end
 
@@ -118,6 +117,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         for sense in 1:num_senses
           for context_word in context
             # TODO vectorize senses
+            # TODO ∇in_senses as [dims, word, sense]
             @inbounds nodes, decisions = paths[context_word]
             @views @inbounds results = σ.(output[nodes, sense])
             @views δs = ((1 .- results) .* (1 .- 2 .* decisions))'
