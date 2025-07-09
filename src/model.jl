@@ -75,79 +75,95 @@ end
 function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, batch_size::Int64, epochs::Int64, α::Float32, λ::Float32)
   num_dims, num_senses, _ = size(model.in_senses)
   _, num_out = size(model.out)
-  ϝs = zeros(Float32, num_senses)
-  bϝs = zeros(Float32, num_senses)
-  ∇out = zeros(Float32, size(model.out))
-  ∇h = zeros(Float32, num_dims, num_senses)
-  ∇in_senses = zeros(Float32, size(model.in_senses))
-  ∇in_subwords = zeros(Float32, size(model.in_subwords))
-  latent = zeros(Float32, num_dims, num_senses)
-  output = zeros(Float32, num_out, num_senses)
+  bϝs = Vector{Vector{Float32}}(undef, num_senses)
+  ∇out = Vector{Array{Float32, 2}}(undef, num_senses)
+  ∇h = Vector{Array{Float32, 2}}(undef, num_senses)
+  ∇in_senses = Vector{Array{Float32, 3}}(undef, num_senses)
+  ∇in_subwords = Vector{Array{Float32, 2}}(undef, num_senses)
+  latent = Vector{Array{Float32, 2}}(undef, num_senses)
+  output = Vector{Array{Float32, 2}}(undef, num_senses)
+  word_set = Vector{Set{UInt64}}(undef, num_senses)
+  subword_set = Vector{Set{UInt32}}(undef, num_senses)
+  word_vector = Vector{Vector{UInt64}}(undef, num_senses)
+  subword_vector = Vector{Vector{UInt32}}(undef, num_senses)
+  for i in 1:nthreads()
+    bϝs[i] = zeros(Float32, num_senses)
+    ∇out[i] = zeros(Float32, size(model.out))
+    ∇h[i] = zeros(Float32, num_dims, num_senses)
+    ∇in_senses[i] = zeros(Float32, size(model.in_senses))
+    ∇in_subwords[i] = zeros(Float32, size(model.in_subwords))
+    latent[i] = zeros(Float32, num_dims, num_senses)
+    output[i] = zeros(Float32, num_out, num_senses)
+    word_set[i] = Set{UInt64}()
+    subword_set[i] = Set{UInt32}()
+    word_vector[i] = UInt64[]
+    subword_vector[i] = UInt32[]
+  end
+  sense_likelihoods = zeros(Float32, num_senses, batch_size)
   for epoch in 1:epochs
     L = 0
     minibatches = AdaSubGram.Dataset.minibatches(training_data, batch_size)
     progress = Progress(length(minibatches), desc="Batches epoch $epoch/$epochs")
-    sense_likelihoods = zeros(Float32, num_senses, batch_size)
-    word_set = Set{UInt64}()
-    subword_set = Set{UInt32}()
-    word_vector = []
-    subword_vector = []
     for minibatch in minibatches # TODO remove batching
       next!(progress)
-      empty!(word_set)
-      empty!(subword_set)
-      fill!(∇out, 0.0f0)
-      fill!(∇h, 0.0f0)
-      @views @inbounds fill!(∇in_senses[:, :, word_vector], 0.0f0)
-      @views @inbounds fill!(∇in_subwords[:, subword_vector], 0.0f0)
+      for i in 1:nthreads()
+        empty!(word_set[i])
+        empty!(subword_set[i])
+        fill!(∇out[i], 0.0f0)
+        fill!(∇h[i], 0.0f0)
+        @views @inbounds fill!(∇in_senses[i][:, :, word_vector[i]], 0.0f0)
+        @views @inbounds fill!(∇in_subwords[i][:, subword_vector[i]], 0.0f0)
+      end
       fill!(sense_likelihoods, 0.0f0)
       # TODO multithreading
-      for (j, (word, subwords, context)) in enumerate(minibatch)
-        @views forward_pass!(model, word, subwords, latent, output) # allocations
+      @threads for (j, (word, subwords, context)) in minibatch
+        @views forward_pass!(model, word, subwords, latent[threadid()], output[threadid()]) # allocations
         @inbounds @views as, bs = compute_beta_parameters(model.ns[:, word], α)
         for sense in 1:num_senses
-          @inbounds ϝs[sense] = digamma(as[sense] + bs[sense])
-          @inbounds bϝs[sense] = digamma(bs[sense]) - ϝs[sense]
-          @inbounds logbeta_k = digamma(as[sense]) - ϝs[sense]
-          @views @inbounds logbeta_complements = sum(bϝs[1:(sense-1)])
+          @inbounds ϝs = digamma(as[sense] + bs[sense])
+          @inbounds bϝs[threadid()][sense] = digamma(bs[sense]) - ϝs
+          @inbounds logbeta_k = digamma(as[sense]) - ϝs
+          @views @inbounds logbeta_complements = sum(bϝs[threadid()][1:(sense-1)])
           @inbounds sense_likelihoods[sense, j] = logbeta_k + logbeta_complements
         end
         # TODO random context dropping
         @simd for context_word in context
           @inbounds nodes, _ = paths[context_word]
-          @views @inbounds sense_likelihoods[:, j] .+= sum(output[nodes, :])
-          @views @inbounds max_outputs = maximum(output[nodes, :], dims=1) # allocations
-          @views @inbounds sense_likelihoods[:, j] .-= sum(max_outputs .+ log.(sum(exp.(output[nodes, :] .- max_outputs), dims=1))) # allocations
+          @views @inbounds sense_likelihoods[:, j] .+= sum(output[threadid()][nodes, :])
+          @views @inbounds max_outputs = maximum(output[threadid()][nodes, :], dims=1) # allocations
+          @views @inbounds sense_likelihoods[:, j] .-= sum(max_outputs .+ log.(sum(exp.(output[threadid()][nodes, :] .- max_outputs), dims=1))) # allocations
         end
         @views @inbounds max_sense = maximum(sense_likelihoods[:, j])
         @views @inbounds sense_likelihoods[:, j] .-= max_sense + log(sum(exp.(sense_likelihoods[:, j] .- max_sense)))
         @views @inbounds sense_likelihoods[:, j] .= exp.(sense_likelihoods[:, j])
         @simd for context_word in context
           @inbounds nodes, decisions = paths[context_word]
-          @views @inbounds results = σ.(output[nodes, :]) # allocations
+          @views @inbounds results = σ.(output[threadid()][nodes, :]) # allocations
           @views δs = ((1 .- results) .* (1 .- 2 .* decisions))' # allocations
-          @views @inbounds mul!(∇out[:, nodes], latent, δs, 1, 1)
-          @views @inbounds ∇h .= dropdims(sum(reshape(δs, :, 1, num_senses) .* reshape(model.out[:, nodes], :, num_dims, 1), dims=1), dims=1) .* sense_likelihoods[:, j]' # allocations
-          @views @inbounds ∇in_senses[:, :, word] .+= ∇h
-          @views @inbounds ∇in_subwords[:, subwords] .+= sum(∇h, dims=2) # allocations
+          @views @inbounds mul!(∇out[threadid()][:, nodes], latent[threadid()], δs, 1, 1)
+          @views @inbounds ∇h[threadid()] .= dropdims(sum(reshape(δs, :, 1, num_senses) .* reshape(model.out[:, nodes], :, num_dims, 1), dims=1), dims=1) .* sense_likelihoods[:, j]' # allocations
+          @views @inbounds ∇in_senses[threadid()][:, :, word] .+= ∇h[threadid()]
+          @views @inbounds ∇in_subwords[threadid()][:, subwords] .+= sum(∇h[threadid()], dims=2) # allocations
           L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)
         end
-        push!(word_set, word)
+        push!(word_set[threadid()], word)
         for subword in subwords
-          push!(subword_set, subword)
+          push!(subword_set[threadid()], subword)
         end
       end
       scaling_factor = length(training_data) / length(minibatch)
       η = 0.025 * (1 - epoch / epochs)
       ρ = η * scaling_factor
-      for (j, (word, _, _)) in enumerate(minibatch)
+      for (j, (word, _, _)) in minibatch
         @views @inbounds model.ns[:, word] .= (1-η) .* model.ns[:, word] .+ (η*model.word_counts[word]) .* sense_likelihoods[:, j]
       end
-      word_vector = collect(word_set)
-      subword_vector = collect(subword_set)
-      @views model.out .-= ρ .* ∇out
-      @views @inbounds model.in_senses[:, :, word_vector] .-= ρ .* ∇in_senses[:, :, word_vector]
-      @views @inbounds model.in_subwords[:, subword_vector] .-= ρ .* ∇in_subwords[:, subword_vector]
+      for i in 1:nthreads()
+        word_vector[i] = collect(word_set[i])
+        subword_vector[i] = collect(subword_set[i])
+        @views model.out .-= ρ .* ∇out[i]
+        @views @inbounds model.in_senses[:, :, word_vector[i]] .-= ρ .* ∇in_senses[i][:, :, word_vector[i]]
+        @views @inbounds model.in_subwords[:, subword_vector[i]] .-= ρ .* ∇in_subwords[i][:, subword_vector[i]]
+      end
     end
     L /= length(training_data)
     finish!(progress)

@@ -105,9 +105,9 @@ of size batch_size. Shuffles the
 dataset first, to ensure it varies
 throughout the training loop.
 """
-function minibatches(dataset::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, batch_size::Int64)::Vector{Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}}
+function minibatches(dataset::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, batch_size::Int64)::Vector{Vector{Tuple{Int64, Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}}}
   shuffle!(dataset)
-  return [dataset[i:min(i+batch_size-1, end)] for i in 1:batch_size:length(dataset)]
+  return [collect(enumerate(dataset[i:min(i+batch_size-1, end)])) for i in 1:batch_size:length(dataset)]
 end
 
 export create_dataset, minibatches, split_subwords

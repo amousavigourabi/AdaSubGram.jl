@@ -12,7 +12,7 @@ include("./export.jl")
 const Filepath=String
 
 function create_encodings(parameters::Filepath, output::Filepath)
-  documents = readlines(parameters)[1:1000]
+  documents = readlines(parameters)[1:500]
   dims = 100
   α = 0.1f0
   λ = 0.05f0
