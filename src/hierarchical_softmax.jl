@@ -69,7 +69,7 @@ function hierarchical_softmax_loss(results::Array{Float32, 2}, targets::Vector{F
   ℓ = 0.0
   _, amount_of_results = size(results)
   for i in 1:amount_of_results
-    for (p, d) in zip(results[:, i], targets)
+    @simd for (p, d) in zip(results[:, i], targets)
       ℓ -= d * log(p + ϵ) + (1 - d) * log(1 - p + ϵ)
     end
   end
