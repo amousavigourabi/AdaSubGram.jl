@@ -115,12 +115,11 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds sense_likelihoods[:, j] .-= max_sense + log(sum(exp.(sense_likelihoods[:, j] .- max_sense)))
         @views @inbounds sense_likelihoods[:, j] .= exp.(sense_likelihoods[:, j])
         @simd for context_word in context
-          # TODO ∇in_senses as [dims, word, sense]
           @inbounds nodes, decisions = paths[context_word]
           @views @inbounds results = σ.(output[nodes, :])
           @views δs = ((1 .- results) .* (1 .- 2 .* decisions))'
           @views @inbounds mul!(∇out[:, nodes], latent, δs, 1, 1)
-          @views @inbounds ∇h .= dropdims(sum(reshape(δs, length(nodes), 1, 6) .* reshape(model.out[:, nodes], length(nodes), 50, 1), dims=1), dims=1) .* sense_likelihoods[:, j]'
+          @views @inbounds ∇h .= dropdims(sum(reshape(δs, length(nodes), 1, num_senses) .* reshape(model.out[:, nodes], length(nodes), num_dims, 1), dims=1), dims=1) .* sense_likelihoods[:, j]'
           @views @inbounds ∇in_senses[:, :, word] .+= ∇h
           @views @inbounds ∇in_subwords[:, subwords] .+= sum(∇h, dims=2)
           L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)

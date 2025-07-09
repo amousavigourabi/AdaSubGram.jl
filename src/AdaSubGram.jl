@@ -13,15 +13,15 @@ const Filepath=String
 
 function create_encodings(parameters::Filepath, output::Filepath)
   documents = readlines(parameters)[1:500]
-  dims = 50
+  dims = 100
   α = 0.1f0
-  λ = 0.02f0
-  senses = 6
+  λ = 0.05f0
+  senses = 10
   context = 6
-  subword_truncation = 100_000
-  s_min = 5
+  subword_truncation = 1_000_000
+  s_min = 4
   s_max = 7
-  batch_size = 64
+  batch_size = 128
   epochs = 2
   normalized_documents = AdaSubGram.Preprocessing.normalize.(documents)
   tokenized_documents = AdaSubGram.Preprocessing.tokenize.(normalized_documents)
