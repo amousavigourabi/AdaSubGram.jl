@@ -31,9 +31,9 @@ function initialize(vector_dims::Int64, word_counts::Vector{UInt64}, input_subwo
   return model
 end
 
-function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2}, model_out::AbstractArray{Float32, 2})::Nothing
+function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::AbstractArray{Float32, 2}, output::AbstractArray{Float32, 2})::Nothing
   @views @inbounds latent .= model.in_senses[:, :, input_word] .+ sum(model.in_subwords[:, input_subwords], dims=2) # allocations
-  mul!(output, model_out', latent)
+  mul!(output, model.out', latent)
   return nothing
 end
 
@@ -103,7 +103,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       fill!(sense_likelihoods, 0.0f0)
       # TODO multithreading
       for (j, (word, subwords, context)) in enumerate(minibatch)
-        @views forward_pass!(model, word, subwords, latent, output, model.out) # allocations
+        @views forward_pass!(model, word, subwords, latent, output) # allocations
         @inbounds @views as, bs = compute_beta_parameters(model.ns[:, word], α)
         for sense in 1:num_senses
           @inbounds ϝs[sense] = digamma(as[sense] + bs[sense])
