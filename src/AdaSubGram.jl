@@ -12,12 +12,12 @@ include("./export.jl")
 const Filepath=String
 
 function create_encodings(parameters::Filepath, output::Filepath)
-  documents = readlines(parameters)[1:500]
+  documents = readlines(parameters)[1:1000]
   dims = 100
   α = 0.1f0
   λ = 0.05f0
   senses = 10
-  context = 6
+  context = 8
   subword_truncation = 1_000_000
   s_min = 4
   s_max = 7
@@ -26,9 +26,9 @@ function create_encodings(parameters::Filepath, output::Filepath)
   normalized_documents = AdaSubGram.Preprocessing.normalize.(documents)
   tokenized_documents = AdaSubGram.Preprocessing.tokenize.(normalized_documents)
   dataset, counts, labels = AdaSubGram.Dataset.create_dataset(tokenized_documents, context, s_min, s_max, UInt32(subword_truncation))
-  nodes, decisions = AdaSubGram.HuffmanTree.huffman_paths(counts)
+  nodes_decisions = AdaSubGram.HuffmanTree.huffman_paths(counts)
   model = AdaSubGram.Model.initialize(dims, counts, subword_truncation, senses)
-  AdaSubGram.Model.train(model, dataset, collect(zip(nodes, decisions)), batch_size, epochs, α, λ)
+  AdaSubGram.Model.train(model, dataset, nodes_decisions, batch_size, epochs, α, λ)
   @views AdaSubGram.Export.embeddings(output, labels, model.in_subwords, model.in_senses, s_min, s_max, UInt32(subword_truncation))
 end
 

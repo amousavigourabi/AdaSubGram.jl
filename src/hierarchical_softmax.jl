@@ -35,14 +35,13 @@ function construct_tree(freqs::Vector{UInt64})::HuffmanNode
   return pop!(pq)[2]
 end
 
-function extract_codes!(root::HuffmanNode, codes::Vector{Vector{Int32}}, decisions::Vector{Vector{Float32}})::Nothing
+function extract_codes!(root::HuffmanNode, codes::Vector{Tuple{Vector{Int32}, Vector{Float32}}})::Nothing
   node_queue = Deque{Tuple{HuffmanNode, Vector{Int32}, Vector{Float32}}}()
   push!(node_queue, (root, Int32[], Float32[]))
   while !isempty(node_queue)
     node, prefix, decision_prefix = popfirst!(node_queue)
     if node isa HuffmanLeaf
-      @inbounds codes[node.symbol] = prefix
-      @inbounds decisions[node.symbol] = decision_prefix
+      @inbounds codes[node.symbol] = prefix, decision_prefix
     elseif node isa HuffmanInternal
       prefix = deepcopy(prefix)
       decision_prefix_one = deepcopy(decision_prefix)
@@ -56,12 +55,11 @@ function extract_codes!(root::HuffmanNode, codes::Vector{Vector{Int32}}, decisio
   return nothing
 end
 
-function huffman_paths(counts::Vector{UInt64})::Tuple{Vector{Vector{Int32}}, Vector{Vector{Float32}}}
+function huffman_paths(counts::Vector{UInt64})::Vector{Tuple{Vector{Int32}, Vector{Float32}}}
   tree = construct_tree(counts)
-  nodes = Vector{Vector{Int32}}(undef, length(counts))
-  decisions = Vector{Vector{Float32}}(undef, length(counts))
-  extract_codes!(tree, nodes, decisions)
-  return nodes, decisions
+  nodes_decisions = Vector{Tuple{Vector{Int32}, Vector{Float32}}}(undef, length(counts))
+  extract_codes!(tree, nodes_decisions)
+  return nodes_decisions
 end
 
 function hierarchical_softmax_loss(results::Array{Float32, 2}, targets::Vector{Float32})::Float64

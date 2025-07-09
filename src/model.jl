@@ -88,13 +88,20 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
     minibatches = AdaSubGram.Dataset.minibatches(training_data, batch_size)
     progress = Progress(length(minibatches), desc="Batches epoch $epoch/$epochs")
     sense_likelihoods = zeros(Float32, num_senses, batch_size)
-    for minibatch in minibatches
+    word_set = Set{UInt64}()
+    subword_set = Set{UInt32}()
+    word_vector = []
+    subword_vector = []
+    for minibatch in minibatches # TODO drop minibatches
       next!(progress)
+      empty!(word_set)
+      empty!(subword_set)
       fill!(∇out, 0.0f0)
       fill!(∇h, 0.0f0)
-      fill!(∇in_senses, 0.0f0)
-      fill!(∇in_subwords, 0.0f0)
+      @views @inbounds fill!(∇in_senses[:, :, word_vector], 0.0f0)
+      @views @inbounds fill!(∇in_subwords[:, :, subword_vector], 0.0f0)
       fill!(sense_likelihoods, 0.0f0)
+      # TODO multithreading
       for (j, (word, subwords, context)) in enumerate(minibatch)
         @views forward_pass!(model, word, subwords, latent, output, model.out)
         @inbounds @views as, bs = compute_beta_parameters(model.ns[:, word], α)
@@ -124,17 +131,22 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
           @views @inbounds ∇in_subwords[:, subwords] .+= sum(∇h, dims=2)
           L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)
         end
+        push!(word_set, word)
+        for subword in subwords
+          push!(subword_set, subword)
+        end
       end
       scaling_factor = length(training_data) / length(minibatch) / 40000
-      L += λ / scaling_factor * (norm(model.out) + norm(model.in_senses) + norm(model.in_subwords))
       η = 0.025 * (1 - epoch / epochs)
       ρ = η * scaling_factor
       for (j, (word, _, _)) in enumerate(minibatch)
         @views @inbounds model.ns[:, word] .= (1-η) .* model.ns[:, word] .+ (η*model.word_counts[word]) .* sense_likelihoods[:, j]
       end
-      @views model.out .-= ρ .* ∇out .+ λ .* model.out
-      @views model.in_senses .-= ρ .* ∇in_senses .+ λ .* model.in_senses
-      @views model.in_subwords .-= ρ .* ∇in_subwords .+ λ .* model.in_subwords
+      word_vector = collect(word_set)
+      subword_vector = collect(subword_vector)
+      @views model.out .-= ρ .* ∇out
+      @views @inbounds model.in_senses[:, :, word_vector] .-= ρ .* ∇in_senses[:, :, word_vector]
+      @views @inbounds model.in_subwords[:, subword_vector] .-= ρ .* ∇in_subwords[:, subword_vector]
     end
     L /= length(training_data)
     finish!(progress)
