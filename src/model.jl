@@ -153,7 +153,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         end
       end
       scaling_factor = 1 / length(minibatch)
-      η = 0.05 * (1 - (epoch - 1 - (b - 1) / length(minibatches)) / epochs)
+      η = 0.025 * (1 - (epoch - 1 - (b - 1) / length(minibatches)) / epochs)
       ρ = η * scaling_factor
       for (j, (word, _, _)) in minibatch
         @views @inbounds model.ns[:, word] .= (1-η) .* model.ns[:, word] .+ (η*model.word_counts[word]) .* sense_likelihoods[:, j]
