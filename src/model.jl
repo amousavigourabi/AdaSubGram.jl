@@ -114,7 +114,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds ∇h[:, :, threadid()] .= model.out[:, nodes] * ζs .* sense_likelihoods[:, threadid()]' # allocations
         @views @inbounds model.in_senses[:, :, word] .-= η .* ∇h[:, :, threadid()]
         @views @inbounds model.in_subwords[:, subwords] .-= η .* sum(∇h[:, :, threadid()], dims=2) # allocations
-        L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)
+        L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results)
       end
       @views @inbounds model.ns[:, word] .= (1 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, threadid()]
     end
