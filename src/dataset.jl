@@ -110,6 +110,11 @@ function minibatches(dataset::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64
   return [collect(enumerate(dataset[i:min(i+batch_size-1, end)])) for i in 1:batch_size:length(dataset)]
 end
 
-export create_dataset, minibatches, split_subwords
+function shuffle!(dataset::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}})::Vector{Tuple{Int64, Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}}
+  Random.shuffle!(dataset)
+  return collect(enumerate(dataset))
+end
+
+export create_dataset, minibatches, split_subwords, shuffle!
 
 end
