@@ -104,7 +104,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
     L = 0
     minibatches = AdaSubGram.Dataset.minibatches(training_data, batch_size)
     progress = Progress(length(minibatches), desc="Batches epoch $epoch/$epochs")
-    for minibatch in minibatches # TODO remove batching
+    for (b, minibatch) in enumerate(minibatches)
       next!(progress)
       for i in 1:nthreads()
         empty!(word_set[i])
@@ -137,6 +137,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds sense_likelihoods[:, j] .-= max_sense + log(sum(exp.(sense_likelihoods[:, j] .- max_sense)))
         @views @inbounds sense_likelihoods[:, j] .= exp.(sense_likelihoods[:, j])
         @simd for context_word in context
+          # TODO check gradient updates!
           @inbounds nodes, decisions = paths[context_word]
           @views @inbounds results = σ.(output[threadid()][nodes, :]) # allocations
           @views δs = ((1 .- results) .* (1 .- 2 .* decisions))' # allocations
@@ -151,8 +152,8 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
           push!(subword_set[threadid()], subword)
         end
       end
-      scaling_factor = length(training_data) / length(minibatch)
-      η = 0.025 * (1 - epoch / epochs)
+      scaling_factor = 1 / length(minibatch)
+      η = 0.025 * (1 - (epoch - 1 - (b - 1) / length(minibatches)) / epochs)
       ρ = η * scaling_factor
       for (j, (word, _, _)) in minibatch
         @views @inbounds model.ns[:, word] .= (1-η) .* model.ns[:, word] .+ (η*model.word_counts[word]) .* sense_likelihoods[:, j]
