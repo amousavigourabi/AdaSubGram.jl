@@ -140,7 +140,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
           # TODO check gradient updates!
           @inbounds nodes, decisions = paths[context_word]
           @views @inbounds results = σ.(output[threadid()][nodes, :]) # allocations
-          @views δs = ((1 .- results) .* (1 .- 2 .* decisions))' # allocations
+          @views δs = (results .- decisions)' # allocations
           @views @inbounds mul!(∇out[threadid()][:, nodes], latent[threadid()], δs, 1, 1)
           @views @inbounds ∇h[threadid()] .= dropdims(sum(reshape(δs, :, 1, num_senses) .* reshape(model.out[:, nodes], :, num_dims, 1), dims=1), dims=1) .* sense_likelihoods[:, j]' # allocations
           @views @inbounds ∇in_senses[threadid()][:, :, word] .+= ∇h[threadid()]
@@ -153,7 +153,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         end
       end
       scaling_factor = 1 / length(minibatch)
-      η = 0.025 * (1 - (epoch - 1 - (b - 1) / length(minibatches)) / epochs)
+      η = 0.05 * (1 - (epoch - 1 - (b - 1) / length(minibatches)) / epochs)
       ρ = η * scaling_factor
       for (j, (word, _, _)) in minibatch
         @views @inbounds model.ns[:, word] .= (1-η) .* model.ns[:, word] .+ (η*model.word_counts[word]) .* sense_likelihoods[:, j]

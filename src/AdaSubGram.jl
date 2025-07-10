@@ -22,7 +22,7 @@ function create_encodings(parameters::Filepath, output::Filepath)
   s_min = 4
   s_max = 7
   batch_size = 128
-  epochs = 2
+  epochs = 5
   normalized_documents = AdaSubGram.Preprocessing.normalize.(documents)
   tokenized_documents = AdaSubGram.Preprocessing.tokenize.(normalized_documents)
   dataset, counts, labels = AdaSubGram.Dataset.create_dataset(tokenized_documents, context, s_min, s_max, UInt32(subword_truncation))
