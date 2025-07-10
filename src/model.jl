@@ -75,29 +75,24 @@ end
 function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, batch_size::Int64, epochs::Int64, α::Float32, λ::Float32)
   num_dims, num_senses, _ = size(model.in_senses)
   _, num_out = size(model.out)
-  bϝs = Vector{Vector{Float32}}(undef, num_senses)
-  ∇out = Vector{Array{Float32, 2}}(undef, num_senses)
-  ∇h = Vector{Array{Float32, 2}}(undef, num_senses)
-  ∇in_senses = Vector{Array{Float32, 3}}(undef, num_senses)
-  ∇in_subwords = Vector{Array{Float32, 2}}(undef, num_senses)
-  latent = Vector{Array{Float32, 2}}(undef, num_senses)
-  output = Vector{Array{Float32, 2}}(undef, num_senses)
-  word_set = Vector{Set{UInt64}}(undef, num_senses)
-  subword_set = Vector{Set{UInt32}}(undef, num_senses)
-  word_vector = Vector{Vector{UInt64}}(undef, num_senses)
-  subword_vector = Vector{Vector{UInt32}}(undef, num_senses)
+  bϝs = Vector{Vector{Float32}}(undef, nthreads())
+  ∇out = zeros(Float32, size(model.out))
+  ∇h = Vector{Array{Float32, 2}}(undef, nthreads())
+  ∇in_senses = zeros(Float32, size(model.in_senses))
+  ∇in_subwords = zeros(Float32, size(model.in_subwords))
+  latent = Vector{Array{Float32, 2}}(undef, nthreads())
+  output = Vector{Array{Float32, 2}}(undef, nthreads())
+  word_set = Vector{Set{UInt64}}(undef, nthreads())
+  subword_set = Vector{Set{UInt32}}(undef, nthreads())
+  word_vector = UInt64[]
+  subword_vector = UInt32[]
   for i in 1:nthreads()
     bϝs[i] = zeros(Float32, num_senses)
-    ∇out[i] = zeros(Float32, size(model.out))
     ∇h[i] = zeros(Float32, num_dims, num_senses)
-    ∇in_senses[i] = zeros(Float32, size(model.in_senses))
-    ∇in_subwords[i] = zeros(Float32, size(model.in_subwords))
     latent[i] = zeros(Float32, num_dims, num_senses)
     output[i] = zeros(Float32, num_out, num_senses)
     word_set[i] = Set{UInt64}()
     subword_set[i] = Set{UInt32}()
-    word_vector[i] = UInt64[]
-    subword_vector[i] = UInt32[]
   end
   sense_likelihoods = zeros(Float32, num_senses, batch_size)
   for epoch in 1:epochs
@@ -109,11 +104,11 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       for i in 1:nthreads()
         empty!(word_set[i])
         empty!(subword_set[i])
-        fill!(∇out[i], 0.0f0)
         fill!(∇h[i], 0.0f0)
-        @views @inbounds fill!(∇in_senses[i][:, :, word_vector[i]], 0.0f0)
-        @views @inbounds fill!(∇in_subwords[i][:, subword_vector[i]], 0.0f0)
       end
+      fill!(∇out, 0.0f0)
+      @views @inbounds fill!(∇in_senses[:, :, word_vector], 0.0f0)
+      @views @inbounds fill!(∇in_subwords[:, subword_vector], 0.0f0)
       fill!(sense_likelihoods, 0.0f0)
       # TODO multithreading
       @threads for (j, (word, subwords, context)) in minibatch
@@ -141,10 +136,10 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
           @inbounds nodes, decisions = paths[context_word]
           @views @inbounds results = σ.(output[threadid()][nodes, :]) # allocations
           @views δs = (results .- decisions)' # allocations
-          @views @inbounds mul!(∇out[threadid()][:, nodes], latent[threadid()], δs, 1, 1)
+          @views @inbounds mul!(∇out[:, nodes], latent[threadid()], δs, 1, 1)
           @views @inbounds ∇h[threadid()] .= dropdims(sum(reshape(δs, :, 1, num_senses) .* reshape(model.out[:, nodes], :, num_dims, 1), dims=1), dims=1) .* sense_likelihoods[:, j]' # allocations
-          @views @inbounds ∇in_senses[threadid()][:, :, word] .+= ∇h[threadid()]
-          @views @inbounds ∇in_subwords[threadid()][:, subwords] .+= sum(∇h[threadid()], dims=2) # allocations
+          @views @inbounds ∇in_senses[:, :, word] .+= ∇h[threadid()]
+          @views @inbounds ∇in_subwords[:, subwords] .+= sum(∇h[threadid()], dims=2) # allocations
           L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions)
         end
         push!(word_set[threadid()], word)
@@ -158,13 +153,15 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       for (j, (word, _, _)) in minibatch
         @views @inbounds model.ns[:, word] .= (1-η) .* model.ns[:, word] .+ (η*model.word_counts[word]) .* sense_likelihoods[:, j]
       end
-      for i in 1:nthreads()
-        word_vector[i] = collect(word_set[i])
-        subword_vector[i] = collect(subword_set[i])
-        @views model.out .-= ρ .* ∇out[i]
-        @views @inbounds model.in_senses[:, :, word_vector[i]] .-= ρ .* ∇in_senses[i][:, :, word_vector[i]]
-        @views @inbounds model.in_subwords[:, subword_vector[i]] .-= ρ .* ∇in_subwords[i][:, subword_vector[i]]
+      for i in 2:nthreads()
+        union!(word_set[1], word_set[i])
+        union!(subword_set[1], subword_set[i])
       end
+      word_vector = collect(word_set[1])
+      subword_vector = collect(subword_set[1])
+      @views model.out .-= ρ .* ∇out
+      @views @inbounds model.in_senses[:, :, word_vector] .-= ρ .* ∇in_senses[:, :, word_vector]
+      @views @inbounds model.in_subwords[:, subword_vector] .-= ρ .* ∇in_subwords[:, subword_vector]
     end
     L /= length(training_data)
     finish!(progress)
