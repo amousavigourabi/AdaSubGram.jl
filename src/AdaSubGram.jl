@@ -21,7 +21,7 @@ function create_encodings(parameters::Filepath, output::Filepath)
   subword_truncation = 1_000_000
   s_min = 4
   s_max = 7
-  epochs = 5
+  epochs = 10
   tokenized_documents = Vector{Vector{String}}(undef, size(documents))
   @threads for i in eachindex(documents)
     tokenized_documents[i] = AdaSubGram.Preprocessing.tokenize(AdaSubGram.Preprocessing.normalize(documents[i]))
