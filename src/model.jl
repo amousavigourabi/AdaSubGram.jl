@@ -53,27 +53,29 @@ end
 #   return likelihoods
 # end
 
-# TODO small Vector -> SVector (using StaticArrays)
-# TODO check if we can use @fastmath
+# TODO use StrideArrays.jl
+# TODO improve memory locality Vector{Tuple} -> Tuple{Vector}
+# TODO small Vector -> SVector (using StaticArrays, for the sense-based likelihoods array for example)
+# TODO check if we can use @fastmath anywhere
 # TODO check types using @code_warntype
 # TODO checkout Base.Cartesian.@nexprs
 # TODO use similar(array) for array creation
 # TODO avoid Dict{Integer, T} for Vector{T}
 # TODO investigate using LoopVectorization.jl
-# TODO use StridedArray type
 # TODO investigate usage of Ref{T}
 # TODO investigate usage of NTuple{N, T}
 
+# TODO review
 function compute_beta_parameters(ns::T, α::Float32) where T <: AbstractArray{Float32, 1}
-  as = ones(Float32, length(ns))
-  bs = fill(α, length(ns))
-  cumulative_ns = zeros(Float32, length(ns))
-  i = length(ns)
+  sense = length(ns)
+  as = ones(Float32, sense)
+  bs = fill(α, sense)
+  cumulative_ns = zeros(Float32, sense)
   for n in reverse(ns)
-    @inbounds cumulative_ns[i] += n
-    @inbounds as[i] += n
-    @inbounds bs[i] += cumulative_ns[i]
-    i -= 1
+    @views @inbounds cumulative_ns[1:sense] .+= n
+    @inbounds as[sense] += n
+    @inbounds bs[sense] += cumulative_ns[sense]
+    sense -= 1
   end
   return as, bs
 end
@@ -83,7 +85,6 @@ function σ(x::Float32)
 end
 
 function logσ(x::Float32)
-  ϵ = 1e-7
   return log(1 / (1 + exp(-x)))
 end
 
