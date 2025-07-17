@@ -53,7 +53,10 @@ end
 #   return likelihoods
 # end
 
+# TODO subsampling of frequent words
 # TODO use StrideArrays.jl
+# TODO loss function for everything, now the loss is running, not perfect.
+# TODO adam for the gradient updates
 # TODO improve memory locality Vector{Tuple} -> Tuple{Vector}
 # TODO small Vector -> SVector (using StaticArrays, for the sense-based likelihoods array for example)
 # TODO check if we can use @fastmath anywhere
@@ -64,20 +67,18 @@ end
 # TODO investigate using LoopVectorization.jl
 # TODO investigate usage of Ref{T}
 # TODO investigate usage of NTuple{N, T}
+# TODO CHECK EVERYTHING!!!! NOTE seems to outperform SkipGram and AdaGram now!
 
-# TODO review
-function compute_beta_parameters(ns::T, α::Float32) where T <: AbstractArray{Float32, 1}
-  sense = length(ns)
-  as = ones(Float32, sense)
-  bs = fill(α, sense)
-  cumulative_ns = zeros(Float32, sense)
-  for n in reverse(ns)
-    @views @inbounds cumulative_ns[1:sense] .+= n
-    @inbounds as[sense] += n
-    @inbounds bs[sense] += cumulative_ns[sense]
-    sense -= 1
+function compute_beta_parameters!(αs::T, βs::T, ns::T, α::Float32) where T <: AbstractArray{Float32, 1}
+  fill!(αs, 1.0f0)
+  fill!(βs, α)
+  cumulative_ns = 0.0f0
+  @inbounds αs .+= ns
+  for sense in length(ns):-1:1
+    cumulative_ns += ns[sense]
+    @inbounds βs[sense] += cumulative_ns
   end
-  return as, bs
+  return αs, βs
 end
 
 function σ(x::Float32)
@@ -88,60 +89,105 @@ function logσ(x::Float32)
   return log(1 / (1 + exp(-x)))
 end
 
-# TODO fix sense_likelihoods!
-# TODO write some tests for it lmao
-function sense_likelihoods!(sense_likelihoods::T, output::O, context::S, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, ns::T, bϝs::T, num_senses::Int64, α::Float32)::Nothing where T <: AbstractArray{Float32, 1} where O <: AbstractArray{Float32, 2} where S <: AbstractArray{UInt64, 1}
-  @inbounds @views as, bs = compute_beta_parameters(ns, α)
+function fastsum(vs::A)::Float32 where A <: AbstractArray{Float32, 1}
+  acc = 0.0f0
+  @simd for v in vs
+    acc += v
+  end
+  return acc
+end
+
+function fastsum!(accs::T, vs::A, ::Val{N})::T where {T <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}, N}
+  n = size(vs, N)
+  if N == 1
+    @simd for v in 1:length(n)
+      @views @inbounds accs .+= vs[v, :]
+    end
+  elseif N == 2
+    @simd for v in 1:length(n)
+      @views @inbounds accs .+= vs[:, v]'
+    end
+  end
+  return accs
+end
+
+function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: AbstractArray{Float32, 1}, D <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}}
+  @simd for v in 1:length(size(vs, 1))
+    @views @inbounds accs .+= logσ.(vs[v, :] .* (1 .- 2 .* decisions[v]))
+  end
+  return accs
+end
+
+function fastsum!(accs::T, vs::A, ::Val{N})::T where {T <: AbstractArray{Float32, 2}, A <: AbstractArray{Float32, 2}, N}
+  n = size(vs, N)
+  if N == 1
+    @simd for v in 1:length(n)
+      @views @inbounds accs .+= vs[v, :]'
+    end
+  elseif N == 2
+    @simd for v in 1:length(n)
+      @views @inbounds accs .+= vs[:, v]
+    end
+  end
+  return accs
+end
+
+# TODO write some tests for this lmao
+function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, context::S, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, ns::T, bϝs::T, num_senses::Int64, α::Float32)::Nothing where T <: AbstractArray{Float32, 1} where O <: AbstractArray{Float32, 2} where S <: AbstractArray{UInt64, 1}
+  @inbounds @views compute_beta_parameters!(as, bs, ns, α)
   for sense in 1:num_senses
     @inbounds ϝs = digamma(as[sense] + bs[sense])
     @inbounds bϝs[sense] = digamma(bs[sense]) - ϝs
     @inbounds logbeta_k = digamma(as[sense]) - ϝs
-    @views @inbounds logbeta_complements = sum(bϝs[1:(sense-1)])
+    @views @inbounds logbeta_complements = fastsum(bϝs[1:(sense-1)])
     @inbounds sense_likelihoods[sense] = logbeta_k + logbeta_complements
   end
   @simd for context_word in context
     @inbounds nodes, decisions = paths[context_word]
-    @views @inbounds sense_likelihoods .+= sum(logσ.(output[nodes, :] .* (1 .- 2 .* decisions)), dims=1)' # allocations
+    @views @inbounds fastsum_likelihoods!(sense_likelihoods, output[nodes, :], decisions)
   end
   max_likelihood = maximum(sense_likelihoods)
-  @views @inbounds sense_likelihoods .= exp.(sense_likelihoods .- max_likelihood) ./ sum(exp.(sense_likelihoods .- max_likelihood)) # allocations
+  sense_likelihoods .= exp.(sense_likelihoods .- max_likelihood)
+  sum_factor = 1.0f0 / fastsum(sense_likelihoods)
+  sense_likelihoods .*= sum_factor
   return nothing
 end
 
 # TODO split up train
 function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, epochs::Int64, α::Float32)
   num_dims, num_senses, _ = size(model.in_senses)
-  _, num_out = size(model.out)
+  num_out = size(model.out, 2)
   bϝs = zeros(Float32, num_senses, nthreads())
   ∇h = zeros(Float32, num_dims, num_senses, nthreads())
   latent = zeros(Float32, num_dims, num_senses, nthreads())
   output = zeros(Float32, num_out, num_senses, nthreads())
   sense_likelihoods = zeros(Float32, num_senses, nthreads())
+  as = zeros(Float32, num_senses, nthreads())
+  bs = zeros(Float32, num_senses, nthreads())
   println("Start at ", now())
   for epoch in 0:(epochs-1)
     L = 0.0
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
     @threads for (j, (word, subwords, context)) in dataset # TODO @threads calibration is poor at the start?
-      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, threadid()], output[:, :, threadid()]) # allocations
-      @inbounds @views clamp!(output[:, :, threadid()], -80.0f0, 80.0f0)
-      @inbounds @views sense_likelihoods!(sense_likelihoods[:, threadid()], output[:, :, threadid()], context, paths, model.ns[:, word], bϝs[:, threadid()], num_senses, α)
+      tid = threadid()
+      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid]) # allocations
+      @inbounds @views clamp!(output[:, :, tid], -80.0f0, 80.0f0)
+      @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
       η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
+      ℓ = 0.0
       @simd for context_word in context
         # TODO check gradient updates!
         @inbounds nodes, decisions = paths[context_word]
-        @views @inbounds results = σ.(output[nodes, :, threadid()]) # allocations
-        @views @inbounds ζs = (decisions .- results) .* sense_likelihoods[:, threadid()]' # allocations
-        @views @inbounds mul!(model.out[:, nodes], latent[:, :, threadid()], ζs', η, 1.0f0)
-        @views @inbounds mul!(∇h[:, :, threadid()], model.out[:, nodes], ζs)
-        @views @inbounds model.in_senses[:, :, word] .+= η .* ∇h[:, :, threadid()]
-        @views @inbounds model.in_subwords[:, subwords] .+= η .* sum(∇h[:, :, threadid()], dims=2) # allocations
-        @views @inbounds L += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions, sense_likelihoods[:, threadid()])
+        @views @inbounds results = σ.(output[nodes, :, tid]) # allocations
+        @views @inbounds ζs = (decisions .- results) .* sense_likelihoods[:, tid]' # allocations
+        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs', η, 1.0f0)
+        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs, η, 0.0f0)
+        @views @inbounds model.in_senses[:, :, word] .+= ∇h[:, :, tid]
+        @views @inbounds fastsum!(model.in_subwords[:, subwords], ∇h[:, :, tid], Val(2))
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions, sense_likelihoods[:, tid]) # allocations
       end
-      # if isnan(maximum(model.out))
-      #   println("Hit a NaN at ", now())
-      #   exit(1)
-      # end
-      @views @inbounds model.ns[:, word] .= (1 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, threadid()]
+      L += ℓ / length(context) # allocations (float conversion bullshit)
+      @views @inbounds model.ns[:, word] .= (1 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
     end
     L /= length(training_data)
     println("Total training loss at epoch ", epoch+1, "/", epochs, ": ", L, " at ", now())
