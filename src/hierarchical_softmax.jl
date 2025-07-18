@@ -66,7 +66,7 @@ function hierarchical_softmax_loss(results::O, decisions::Vector{Float32}, likel
   fill!(sense_sums, 0.0f0)
   for w in axes(results, 2)
     @simd ivdep for v in axes(results, 1)
-      @inbounds sense_sums[w] += log((1.0f0 - decisions[v]) * (1.0f0 - results[v, w]) + decisions[v] * results[v, w])
+      @inbounds sense_sums[v] += log((1.0f0 - decisions[w]) * (1.0f0 - results[v, w]) + decisions[w] * results[v, w])
     end
   end
   sense_sums .*= likelihoods

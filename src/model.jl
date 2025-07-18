@@ -35,7 +35,7 @@ function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Ve
   @views @inbounds sum!(latent[:, 1], model.in_subwords[:, input_subwords])
   @views @inbounds latent[:, 2:end] .= latent[:, 1]
   @views @inbounds latent .+= model.in_senses[:, :, input_word]
-  @views @inbounds mul!(output[idx, :], model.out[:, idx]', latent)
+  @views @inbounds mul!(output[:, idx], latent', model.out[:, idx])
 end
 
 # TODO
@@ -54,7 +54,6 @@ end
 #   return likelihoods
 # end
 
-# TODO use output[senses, nodes, tid]
 # TODO compute loss during sense likelihoods
 # TODO subsampling of frequent words
 # TODO use StrideArrays.jl
@@ -75,9 +74,9 @@ function compute_beta_parameters!(αs::T, βs::T, ns::T, α::Float32) where T <:
   fill!(αs, 1.0f0)
   fill!(βs, α)
   cumulative_ns = 0.0f0
-  @inbounds αs .+= ns
+  αs .+= ns
   for sense in length(ns):-1:1
-    cumulative_ns += ns[sense]
+    @inbounds cumulative_ns += ns[sense]
     @inbounds βs[sense] += cumulative_ns
   end
   return αs, βs
@@ -87,14 +86,10 @@ function σ(x::Float32)
   return 1.0f0 / (1.0f0 + exp(-x))
 end
 
-function logσ(x::Float32)
-  return log(1.0f0 / (1.0f0 + exp(-x)))
-end
-
 function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: AbstractArray{Float32, 1}, D <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}}
   for w in axes(vs, 2)
     @simd ivdep for v in axes(vs, 1)
-      @inbounds accs[w] += log(vs[v, w] * decisions[v] + (1.0f0 - vs[v, w]) * (1.0f0 - decisions[v]))
+      @inbounds accs[v] += log(vs[v, w] * decisions[w] + (1.0f0 - vs[v, w]) * (1.0f0 - decisions[w]))
     end
   end
   return accs
@@ -112,7 +107,7 @@ function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, conte
   end
   @simd for context_word in context
     @inbounds nodes, decisions = paths[context_word]
-    @views @inbounds fastsum_likelihoods!(sense_likelihoods, output[nodes, :], decisions)
+    @views @inbounds fastsum_likelihoods!(sense_likelihoods, output[:, nodes], decisions)
   end
   max_likelihood = maximum(sense_likelihoods)
   sense_likelihoods .= exp.(sense_likelihoods .- max_likelihood)
@@ -125,17 +120,20 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   num_dims, num_senses, _ = size(model.in_senses)
   num_out = size(model.out, 2)
   # TODO move all these preallocated structures into a struct
-  ζs = zeros(Float32, max_nodes, num_senses, nthreads())
+  ζs = zeros(Float32, num_senses, max_nodes, nthreads())
   sense_sums = zeros(Float32, num_senses, nthreads())
   bϝs = zeros(Float32, num_senses, nthreads())
   ∇h = zeros(Float32, num_dims, num_senses, nthreads())
   ∇h_sum = zeros(Float32, num_dims, nthreads())
   latent = zeros(Float32, num_dims, num_senses, nthreads())
-  output = zeros(Float32, num_out, num_senses, nthreads())
+  output = zeros(Float32, num_senses, num_out, nthreads())
   sense_likelihoods = zeros(Float32, num_senses, nthreads())
   as = zeros(Float32, num_senses, nthreads())
   bs = zeros(Float32, num_senses, nthreads())
-  nodeset = fill(Set{Int32}(), nthreads())
+  nodeset = Vector{Set{Int32}}(undef, nthreads())
+  for i in eachindex(nodeset)
+    nodeset[i] = Set{Int32}()
+  end
   println("Start at ", now())
   for epoch in 0:(epochs-1)
     L = 0.0
@@ -144,26 +142,26 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       tid = threadid()
       empty!(nodeset[tid])
       for i in eachindex(context)
-        nodes, _ = paths[context[i]]
-        union!(nodeset[tid], nodes)
+        @inbounds nodes, _ = paths[context[i]]
+        @inbounds union!(nodeset[tid], nodes)
       end
-      nodevec = collect(nodeset[tid])
+      @inbounds nodevec = collect(nodeset[tid])
       @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec) # TODO semi expensive .6
-      @inbounds @views clamp!(output[nodevec, :, tid], -16.0f0, 16.0f0) # TODO semi expensive .4
-      @inbounds @views output[nodevec, :, tid] .= σ.(output[nodevec, :, tid])
+      @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0) # TODO semi expensive .4
+      @inbounds @views output[:, nodevec, tid] .= σ.(output[:, nodevec, tid])
       @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α) # TODO semi expensive .1
       η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
       ℓ = 0.0
       for i in eachindex(context) # TODO most expensive 6.3
         # TODO check gradient updates!
         @inbounds nodes, decisions = paths[context[i]]
-        @views @inbounds ζs[1:length(nodes), :, tid] .= (decisions .- output[nodes, :, tid]) .* sense_likelihoods[:, tid]'
-        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs[1:length(nodes), :, tid]', η, 1.0f0)
-        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs[1:length(nodes), :, tid], η, 0.0f0)
+        @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid]
+        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η, 1.0f0)
+        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs[:, 1:length(nodes), tid]', η, 0.0f0)
         @views @inbounds model.in_senses[:, :, word] .+= ∇h[:, :, tid]
         @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
         @views @inbounds model.in_subwords[:, subwords] .+= ∇h_sum[:, tid]
-        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[nodes, :, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
       L += ℓ / length(context) # TODO only spot where there are any allocations
       @views @inbounds model.ns[:, word] .= (1.0f0 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
