@@ -31,12 +31,11 @@ function initialize(vector_dims::Int64, word_counts::Vector{UInt64}, input_subwo
   return model
 end
 
-function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::T, output::T)::Nothing where T <: AbstractArray{Float32, 2}
+function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::T, output::T, idx::I) where {T <: AbstractArray{Float32, 2}, I <: AbstractArray{Int32, 1}}
   @views @inbounds sum!(latent[:, 1], model.in_subwords[:, input_subwords])
   @views @inbounds latent[:, 2:end] .= latent[:, 1]
   @views @inbounds latent .+= model.in_senses[:, :, input_word]
-  mul!(output, model.out', latent)
-  return nothing
+  @views @inbounds mul!(output[idx, :], model.out[:, idx]', latent)
 end
 
 # TODO
@@ -55,8 +54,7 @@ end
 #   return likelihoods
 # end
 
-# TODO reduce amount of clamp! calls
-# TODO investigate only one sigmoid call
+# TODO use output[senses, nodes, tid]
 # TODO compute loss during sense likelihoods
 # TODO subsampling of frequent words
 # TODO use StrideArrays.jl
@@ -96,14 +94,14 @@ end
 function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: AbstractArray{Float32, 1}, D <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}}
   for w in axes(vs, 2)
     @simd ivdep for v in axes(vs, 1)
-      @inbounds accs[w] += logσ(vs[v, w] * (1.0f0 - 2.0f0 * decisions[v]))
+      @inbounds accs[w] += log(vs[v, w] * decisions[v] + (1.0f0 - vs[v, w]) * (1.0f0 - decisions[v]))
     end
   end
   return accs
 end
 
 # TODO write some tests for this lmao
-function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, context::S, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, ns::T, bϝs::T, num_senses::Int64, α::Float32)::Nothing where T <: AbstractArray{Float32, 1} where O <: AbstractArray{Float32, 2} where S <: AbstractArray{UInt64, 1}
+function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, context::S, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, ns::T, bϝs::T, num_senses::Int64, α::Float32) where T <: AbstractArray{Float32, 1} where O <: AbstractArray{Float32, 2} where S <: AbstractArray{UInt64, 1}
   @inbounds @views compute_beta_parameters!(as, bs, ns, α)
   for sense in 1:num_senses
     @inbounds ϝs = digamma(as[sense] + bs[sense])
@@ -120,7 +118,6 @@ function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, conte
   sense_likelihoods .= exp.(sense_likelihoods .- max_likelihood)
   sum_factor = 1.0f0 / sum(sense_likelihoods)
   sense_likelihoods .*= sum_factor
-  return nothing
 end
 
 # TODO split up train
@@ -128,7 +125,6 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   num_dims, num_senses, _ = size(model.in_senses)
   num_out = size(model.out, 2)
   # TODO move all these preallocated structures into a struct
-  results = zeros(Float32, max_nodes, num_senses, nthreads())
   ζs = zeros(Float32, max_nodes, num_senses, nthreads())
   sense_sums = zeros(Float32, num_senses, nthreads())
   bϝs = zeros(Float32, num_senses, nthreads())
@@ -139,28 +135,35 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   sense_likelihoods = zeros(Float32, num_senses, nthreads())
   as = zeros(Float32, num_senses, nthreads())
   bs = zeros(Float32, num_senses, nthreads())
+  nodeset = fill(Set{Int32}(), nthreads())
   println("Start at ", now())
   for epoch in 0:(epochs-1)
     L = 0.0
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
     @threads for (j, (word, subwords, context)) in dataset # TODO @threads calibration is poor at the start?
       tid = threadid()
-      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid]) # TODO semi expensive .6
-      @inbounds @views clamp!(output[:, :, tid], -16.0f0, 16.0f0) # TODO semi expensive .4
+      empty!(nodeset[tid])
+      for i in eachindex(context)
+        nodes, _ = paths[context[i]]
+        union!(nodeset[tid], nodes)
+      end
+      nodevec = collect(nodeset[tid])
+      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec) # TODO semi expensive .6
+      @inbounds @views clamp!(output[nodevec, :, tid], -16.0f0, 16.0f0) # TODO semi expensive .4
+      @inbounds @views output[nodevec, :, tid] .= σ.(output[nodevec, :, tid])
       @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α) # TODO semi expensive .1
       η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
       ℓ = 0.0
       for i in eachindex(context) # TODO most expensive 6.3
         # TODO check gradient updates!
         @inbounds nodes, decisions = paths[context[i]]
-        @views @inbounds results[1:length(nodes), :, tid] .= σ.(output[nodes, :, tid])
-        @views @inbounds ζs[1:length(nodes), :, tid] .= (decisions .- results[1:length(nodes), :, tid]) .* sense_likelihoods[:, tid]'
+        @views @inbounds ζs[1:length(nodes), :, tid] .= (decisions .- output[nodes, :, tid]) .* sense_likelihoods[:, tid]'
         @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs[1:length(nodes), :, tid]', η, 1.0f0)
         @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs[1:length(nodes), :, tid], η, 0.0f0)
         @views @inbounds model.in_senses[:, :, word] .+= ∇h[:, :, tid]
         @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
         @views @inbounds model.in_subwords[:, subwords] .+= ∇h_sum[:, tid]
-        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results[1:length(nodes), :, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[nodes, :, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
       L += ℓ / length(context) # TODO only spot where there are any allocations
       @views @inbounds model.ns[:, word] .= (1.0f0 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
