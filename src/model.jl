@@ -82,11 +82,11 @@ function compute_beta_parameters!(αs::T, βs::T, ns::T, α::Float32) where T <:
 end
 
 function σ(x::Float32)
-  return 1 / (1 + exp(-x))
+  return 1.0f0 / (1.0f0 + exp(-x))
 end
 
 function logσ(x::Float32)
-  return log(1 / (1 + exp(-x)))
+  return log(1.0f0 / (1.0f0 + exp(-x)))
 end
 
 function fastsum(vs::A)::Float32 where A <: AbstractArray{Float32, 1}
