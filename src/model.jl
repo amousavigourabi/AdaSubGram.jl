@@ -32,7 +32,9 @@ function initialize(vector_dims::Int64, word_counts::Vector{UInt64}, input_subwo
 end
 
 function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::T, output::T)::Nothing where T <: AbstractArray{Float32, 2}
-  @views @inbounds latent .= model.in_senses[:, :, input_word] .+ sum(model.in_subwords[:, input_subwords], dims=2) # allocations
+  @views @inbounds sum!(latent[:, 1], model.in_subwords[:, input_subwords])
+  @views @inbounds latent[:, 2:end] .= latent[:, 1]
+  @views @inbounds latent .+= model.in_senses[:, :, input_word]
   mul!(output, model.out', latent)
   return nothing
 end
@@ -53,6 +55,8 @@ end
 #   return likelihoods
 # end
 
+# TODO reduce amount of clamp! calls
+# TODO compute loss during sense likelihoods
 # TODO subsampling of frequent words
 # TODO use StrideArrays.jl
 # TODO loss function for everything, now the loss is running, not perfect.
@@ -89,8 +93,10 @@ function logσ(x::Float32)
 end
 
 function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: AbstractArray{Float32, 1}, D <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}}
-  @simd for v in 1:size(vs, 1)
-    @views @inbounds accs .+= logσ.(vs[v, :] .* (1.0f0 .- 2.0f0 .* decisions[v]))
+  for w in axes(vs, 2)
+    @simd ivdep for v in axes(vs, 1)
+      @inbounds accs[w] += logσ(vs[v, w] * (1.0f0 - 2.0f0 * decisions[v]))
+    end
   end
   return accs
 end
@@ -120,6 +126,7 @@ end
 function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, epochs::Int64, α::Float32)
   num_dims, num_senses, _ = size(model.in_senses)
   num_out = size(model.out, 2)
+  sense_sums = zeros(Float32, num_senses, nthreads())
   bϝs = zeros(Float32, num_senses, nthreads())
   ∇h = zeros(Float32, num_dims, num_senses, nthreads())
   ∇h_sum = zeros(Float32, num_dims, nthreads())
@@ -149,7 +156,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds model.in_senses[:, :, word] .+= ∇h[:, :, tid]
         @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
         @views @inbounds model.in_subwords[:, subwords] .+= ∇h_sum[:, tid]
-        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions, sense_likelihoods[:, tid]) # allocations
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
       L += ℓ / length(context) # allocations (float conversion bullshit)
       @views @inbounds model.ns[:, word] .= (1 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]

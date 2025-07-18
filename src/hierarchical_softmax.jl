@@ -65,9 +65,16 @@ end
 const ϵ_min = Float32(1e-7)
 const ϵ_max = 1.0f0 - Float32(1e-7)
 
-function hierarchical_softmax_loss(results::Array{Float32, 2}, decisions::Vector{Float32}, likelihoods::A)::Float64 where A <: AbstractArray{Float32, 1}
+function hierarchical_softmax_loss(results::O, decisions::Vector{Float32}, likelihoods::A, sense_sums::A)::Float64 where {A <: AbstractArray{Float32, 1}, O <: AbstractArray{Float32, 2}}
   clamp!(results, ϵ_min, ϵ_max)
-  return -sum(sum(log.((1.0f0 .- decisions) .* (1.0f0 .- results) .+ decisions .* results), dims=1) .* likelihoods')
+  fill!(sense_sums, 0.0f0)
+  for w in axes(results, 2)
+    @simd ivdep for v in axes(results, 1)
+      @inbounds sense_sums[w] += log((1.0f0 - decisions[v]) * (1.0f0 - results[v, w]) + decisions[v] * results[v, w])
+    end
+  end
+  sense_sums .*= likelihoods
+  return -sum(sense_sums)
 end
 
 export huffman_paths, hierarchical_softmax_loss
