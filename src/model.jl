@@ -56,6 +56,7 @@ end
 # end
 
 # TODO reduce amount of clamp! calls
+# TODO investigate only one sigmoid call
 # TODO compute loss during sense likelihoods
 # TODO subsampling of frequent words
 # TODO use StrideArrays.jl
@@ -123,9 +124,12 @@ function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, conte
 end
 
 # TODO split up train
-function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, epochs::Int64, α::Float32)
+function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, epochs::Int64, α::Float32, max_nodes::Int64)
   num_dims, num_senses, _ = size(model.in_senses)
   num_out = size(model.out, 2)
+  # TODO move all these preallocated structures into a struct
+  results = zeros(Float32, max_nodes, num_senses, nthreads())
+  ζs = zeros(Float32, max_nodes, num_senses, nthreads())
   sense_sums = zeros(Float32, num_senses, nthreads())
   bϝs = zeros(Float32, num_senses, nthreads())
   ∇h = zeros(Float32, num_dims, num_senses, nthreads())
@@ -141,25 +145,25 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
     @threads for (j, (word, subwords, context)) in dataset # TODO @threads calibration is poor at the start?
       tid = threadid()
-      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid]) # allocations
-      @inbounds @views clamp!(output[:, :, tid], -80.0f0, 80.0f0)
-      @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
+      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid]) # TODO semi expensive .6
+      @inbounds @views clamp!(output[:, :, tid], -80.0f0, 80.0f0) # TODO semi expensive .4
+      @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α) # TODO semi expensive .1
       η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
       ℓ = 0.0
-      @simd for context_word in context
+      for i in eachindex(context) # TODO most expensive 6.3
         # TODO check gradient updates!
-        @inbounds nodes, decisions = paths[context_word]
-        @views @inbounds results = σ.(output[nodes, :, tid]) # allocations
-        @views @inbounds ζs = (decisions .- results) .* sense_likelihoods[:, tid]' # allocations
-        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs', η, 1.0f0)
-        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs, η, 0.0f0)
+        @inbounds nodes, decisions = paths[context[i]]
+        @views @inbounds results[1:length(nodes), :, tid] .= σ.(output[nodes, :, tid])
+        @views @inbounds ζs[1:length(nodes), :, tid] .= (decisions .- results[1:length(nodes), :, tid]) .* sense_likelihoods[:, tid]'
+        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs[1:length(nodes), :, tid]', η, 1.0f0)
+        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs[1:length(nodes), :, tid], η, 0.0f0)
         @views @inbounds model.in_senses[:, :, word] .+= ∇h[:, :, tid]
         @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
         @views @inbounds model.in_subwords[:, subwords] .+= ∇h_sum[:, tid]
-        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results[1:length(nodes), :, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
-      L += ℓ / length(context) # allocations (float conversion bullshit)
-      @views @inbounds model.ns[:, word] .= (1 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
+      L += ℓ / length(context) # TODO only spot where there are any allocations
+      @views @inbounds model.ns[:, word] .= (1.0f0 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
     end
     L /= length(training_data)
     println("Total training loss at epoch ", epoch+1, "/", epochs, ": ", L, " at ", now())

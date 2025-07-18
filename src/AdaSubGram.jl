@@ -29,7 +29,8 @@ function create_encodings(parameters::Filepath, output::Filepath)
   dataset, counts, labels = AdaSubGram.Dataset.create_dataset(tokenized_documents, context, s_min, s_max, UInt32(subword_truncation))
   nodes_decisions = AdaSubGram.HuffmanTree.huffman_paths(counts)
   model = AdaSubGram.Model.initialize(dims, counts, subword_truncation, senses)
-  AdaSubGram.Model.train(model, dataset, nodes_decisions, epochs, α)
+  max_nodes = maximum(length, nodes_decisions[1])
+  AdaSubGram.Model.train(model, dataset, nodes_decisions, epochs, α, max_nodes)
   @views AdaSubGram.Export.embeddings(output, labels, model.in_subwords, model.in_senses, s_min, s_max, UInt32(subword_truncation))
 end
 
