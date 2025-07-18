@@ -62,11 +62,7 @@ function huffman_paths(counts::Vector{UInt64})::Vector{Tuple{Vector{Int32}, Vect
   return nodes_decisions
 end
 
-const ϵ_min = Float32(1e-7)
-const ϵ_max = 1.0f0 - Float32(1e-7)
-
 function hierarchical_softmax_loss(results::O, decisions::Vector{Float32}, likelihoods::A, sense_sums::A)::Float64 where {A <: AbstractArray{Float32, 1}, O <: AbstractArray{Float32, 2}}
-  clamp!(results, ϵ_min, ϵ_max)
   fill!(sense_sums, 0.0f0)
   for w in axes(results, 2)
     @simd ivdep for v in axes(results, 1)

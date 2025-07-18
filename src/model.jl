@@ -146,7 +146,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
     @threads for (j, (word, subwords, context)) in dataset # TODO @threads calibration is poor at the start?
       tid = threadid()
       @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid]) # TODO semi expensive .6
-      @inbounds @views clamp!(output[:, :, tid], -80.0f0, 80.0f0) # TODO semi expensive .4
+      @inbounds @views clamp!(output[:, :, tid], -16.0f0, 16.0f0) # TODO semi expensive .4
       @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α) # TODO semi expensive .1
       η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
       ℓ = 0.0
