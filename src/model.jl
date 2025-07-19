@@ -54,6 +54,7 @@ end
 #   return likelihoods
 # end
 
+# TODO fix failing tests
 # TODO compute loss during sense likelihoods
 # TODO subsampling of frequent words
 # TODO use StrideArrays.jl
@@ -132,7 +133,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   bs = zeros(Float32, num_senses, nthreads())
   nodeset = Vector{Set{Int32}}(undef, nthreads())
   for i in eachindex(nodeset)
-    nodeset[i] = Set{Int32}()
+    @inbounds nodeset[i] = Set{Int32}()
   end
   println("Start at ", now())
   for epoch in 0:(epochs-1)
@@ -140,19 +141,19 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
     @threads for (j, (word, subwords, context)) in dataset # TODO @threads calibration is poor at the start?
       tid = threadid()
-      empty!(nodeset[tid])
+      @inbounds empty!(nodeset[tid])
       for i in eachindex(context)
         @inbounds nodes, _ = paths[context[i]]
         @inbounds union!(nodeset[tid], nodes)
       end
-      @inbounds nodevec = collect(nodeset[tid])
-      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec) # TODO semi expensive .6
-      @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0) # TODO semi expensive .4
+      @inbounds nodevec = collect(nodeset[tid]) # move this to dataset creation!
+      @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec)
+      @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
       @inbounds @views output[:, nodevec, tid] .= σ.(output[:, nodevec, tid])
-      @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α) # TODO semi expensive .1
+      @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
       η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
       ℓ = 0.0
-      for i in eachindex(context) # TODO most expensive 6.3
+      for i in eachindex(context)
         # TODO check gradient updates!
         @inbounds nodes, decisions = paths[context[i]]
         @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid]
