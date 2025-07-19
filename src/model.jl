@@ -54,7 +54,7 @@ end
 #   return likelihoods
 # end
 
-# TODO fix failing tests
+# TODO set up memory pool struct
 # TODO compute loss during sense likelihoods
 # TODO subsampling of frequent words
 # TODO use StrideArrays.jl
@@ -83,7 +83,7 @@ function compute_beta_parameters!(αs::T, βs::T, ns::T, α::Float32) where T <:
   return αs, βs
 end
 
-function σ(x::Float32)
+function σ(x::Float32)::Float32
   return 1.0f0 / (1.0f0 + exp(-x))
 end
 
