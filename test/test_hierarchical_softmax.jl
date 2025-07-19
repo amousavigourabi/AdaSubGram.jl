@@ -12,9 +12,10 @@ end
 @testset "Loss one-hot likelihoods" begin
   ϵ = 1e-6
   likelihoods = [1.0f0, 0.0f0, 0.0f0]
-  results = [1.0f0 0.8f0 0.9f0; 0.5f0 0.7f0 0.1f0; 0.1f0 0.9f0 0.7f0; 0.3f0 1.0f0 0.2f0]
+  buf = similar(likelihoods)
+  results = [1.0f0 0.5f0 0.1f0 0.3f0; 0.8f0 0.7f0 0.9f0 0.00001f0; 0.9f0 0.1f0 0.7f0 0.2f0]
   targets = [1.0f0, 1.0f0, 1.0f0, 0.0f0]
-  loss = AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, targets, likelihoods)
+  loss = AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, targets, likelihoods, buf)
   loss_target = - log(0.5f0) - log(0.1f0) - log(0.7f0)
   @test loss_target - ϵ < loss < loss_target + ϵ
 end
@@ -22,9 +23,10 @@ end
 @testset "Loss mixed likelihoods" begin
   ϵ = 1e-6
   likelihoods = [0.5f0, 0.2f0, 0.3f0]
-  results = [0.8f0 0.9f0 1.0f0; 0.4f0 0.7f0 0.1f0; 0.2f0 1.0f0 0.7f0; 0.0f0 0.6f0 0.2f0]
+  buf = similar(likelihoods)
+  results = [0.8f0 0.4f0 0.2f0 0.0f0; 0.9f0 0.7f0 1.0f0 0.6f0; 1.0f0 0.1f0 0.7f0 0.2f0]
   targets = [1.0f0, 1.0f0, 1.0f0, 0.0f0]
-  loss = AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, targets, likelihoods)
+  loss = AdaSubGram.HuffmanTree.hierarchical_softmax_loss(results, targets, likelihoods, buf)
   loss_target = - 0.5f0 * (log(0.8f0) + log(0.4f0) + log(0.2f0)) - 0.2f0 * (log(0.9f0) + log(0.7f0) + log(0.4f0)) - 0.3f0 * (log(0.1f0) + log(0.7f0) + log(0.8f0))
   @test loss_target - ϵ < loss < loss_target + ϵ
 end
