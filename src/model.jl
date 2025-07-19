@@ -87,6 +87,14 @@ function σ(x::Float32)::Float32
   return 1.0f0 / (1.0f0 + exp(-x))
 end
 
+function sigmoid!(arr::A) where {A <: AbstractArray{Float32, 2}}
+  for w in axes(arr, 2)
+    @simd ivdep for v in axes(arr, 1)
+      arr[v, w] = σ(arr[v, w])
+    end
+  end
+end
+
 function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: AbstractArray{Float32, 1}, D <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}}
   for w in axes(vs, 2)
     @simd ivdep for v in axes(vs, 1)
@@ -149,7 +157,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       @inbounds nodevec = collect(nodeset[tid]) # move this to dataset creation!
       @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec)
       @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
-      @inbounds @views output[:, nodevec, tid] .= σ.(output[:, nodevec, tid])
+      @inbounds @views sigmoid!(output[:, nodevec, tid])
       @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
       η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
       ℓ = 0.0
