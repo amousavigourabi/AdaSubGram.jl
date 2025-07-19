@@ -87,10 +87,26 @@ function σ(x::Float32)::Float32
   return 1.0f0 / (1.0f0 + exp(-x))
 end
 
-function sigmoid!(arr::A) where {A <: AbstractArray{Float32, 2}}
+function sigmoid!(arr::A) where A <: AbstractArray{Float32, 2}
   for w in axes(arr, 2)
     @simd ivdep for v in axes(arr, 1)
-      arr[v, w] = σ(arr[v, w])
+      @inbounds arr[v, w] = σ(arr[v, w])
+    end
+  end
+end
+
+function add!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: AbstractArray{Float32, 2}}
+  for w in axes(to, 2)
+    @simd ivdep for v in axes(to, 1)
+      @inbounds to[v, w] += from[v, w]
+    end
+  end
+end
+
+function add_all!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: AbstractArray{Float32, 1}}
+  for w in axes(to, 2)
+    @simd ivdep for v in axes(to, 1)
+      @inbounds to[v, w] += from[v]
     end
   end
 end
@@ -154,7 +170,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @inbounds nodes, _ = paths[context[i]]
         @inbounds union!(nodeset[tid], nodes)
       end
-      @inbounds nodevec = collect(nodeset[tid]) # move this to dataset creation!
+      @inbounds nodevec = collect(nodeset[tid]) # TODO move this to dataset creation!
       @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec)
       @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
       @inbounds @views sigmoid!(output[:, nodevec, tid])
@@ -163,14 +179,14 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       ℓ = 0.0
       for i in eachindex(context)
         # TODO check gradient updates!
-        @inbounds nodes, decisions = paths[context[i]]
-        @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid]
-        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η, 1.0f0)
-        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs[:, 1:length(nodes), tid]', η, 0.0f0)
-        @views @inbounds model.in_senses[:, :, word] .+= ∇h[:, :, tid]
-        @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
-        @views @inbounds model.in_subwords[:, subwords] .+= ∇h_sum[:, tid]
-        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
+        @inbounds nodes, decisions = paths[context[i]] # 4
+        @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid] # 10
+        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η, 1.0f0) # 190
+        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs[:, 1:length(nodes), tid]', η, 0.0f0) # 180
+        @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid]) # 35
+        @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid]) # 11
+        @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid]) # 15
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid]) # 12
       end
       L += ℓ / length(context) # TODO only spot where there are any allocations
       @views @inbounds model.ns[:, word] .= (1.0f0 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
