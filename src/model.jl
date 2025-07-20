@@ -34,7 +34,7 @@ end
 function forward_pass!(model::Parameters, input_word::UInt64, input_subwords::Vector{UInt32}, latent::T, output::T, idx::I) where {T <: AbstractArray{Float32, 2}, I <: AbstractArray{Int32, 1}}
   @views @inbounds sum!(latent[:, 1], model.in_subwords[:, input_subwords])
   @views @inbounds latent[:, 2:end] .= latent[:, 1]
-  @views @inbounds latent .+= model.in_senses[:, :, input_word]
+  @views @inbounds add!(latent, model.in_senses[:, :, input_word])
   @views @inbounds mul!(output[:, idx], latent', model.out[:, idx])
 end
 
