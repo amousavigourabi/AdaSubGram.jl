@@ -83,11 +83,11 @@ function compute_beta_parameters!(αs::T, βs::T, ns::T, α::Float32) where T <:
   return αs, βs
 end
 
-function σ(x::Float32)::Float32
+@inline function σ(x::Float32)::Float32
   return 1.0f0 / (1.0f0 + exp(-x))
 end
 
-function sigmoid!(arr::A) where A <: AbstractArray{Float32, 2}
+@inline function sigmoid!(arr::A) where A <: AbstractArray{Float32, 2}
   for w in axes(arr, 2)
     @simd ivdep for v in axes(arr, 1)
       @inbounds arr[v, w] = σ(arr[v, w])
@@ -95,7 +95,7 @@ function sigmoid!(arr::A) where A <: AbstractArray{Float32, 2}
   end
 end
 
-function add!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: AbstractArray{Float32, 2}}
+@inline function add!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: AbstractArray{Float32, 2}}
   for w in axes(to, 2)
     @simd ivdep for v in axes(to, 1)
       @inbounds to[v, w] += from[v, w]
@@ -103,7 +103,7 @@ function add!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: Abstra
   end
 end
 
-function add_all!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: AbstractArray{Float32, 1}}
+@inline function add_all!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: AbstractArray{Float32, 1}}
   for w in axes(to, 2)
     @simd ivdep for v in axes(to, 1)
       @inbounds to[v, w] += from[v]
@@ -111,7 +111,7 @@ function add_all!(to::A, from::B) where {A <: AbstractArray{Float32, 2}, B <: Ab
   end
 end
 
-function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: AbstractArray{Float32, 1}, D <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}}
+@inline function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: AbstractArray{Float32, 1}, D <: AbstractArray{Float32, 1}, A <: AbstractArray{Float32, 2}}
   for w in axes(vs, 2)
     @simd ivdep for v in axes(vs, 1)
       @inbounds accs[v] += log(vs[v, w] * decisions[w] + (1.0f0 - vs[v, w]) * (1.0f0 - decisions[w]))
@@ -121,6 +121,7 @@ function fastsum_likelihoods!(accs::T, vs::A, decisions::D)::T where {T <: Abstr
 end
 
 # TODO write some tests for this lmao
+# TODO as, bs, sense_likelihoods, bϝs as MVector ?
 function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, context::S, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, ns::T, bϝs::T, num_senses::Int64, α::Float32) where T <: AbstractArray{Float32, 1} where O <: AbstractArray{Float32, 2} where S <: AbstractArray{UInt64, 1}
   @inbounds @views compute_beta_parameters!(as, bs, ns, α)
   for sense in 1:num_senses
