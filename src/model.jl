@@ -147,6 +147,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   num_out = size(model.out, 2)
   # TODO move all these preallocated structures into a struct
   ζs = zeros(Float32, num_senses, max_nodes, nthreads())
+  scratch_out = zeros(Float32, num_dims, max_nodes, nthreads())
   sense_sums = zeros(Float32, num_senses, nthreads())
   bϝs = zeros(Float32, num_senses, nthreads())
   ∇h = zeros(Float32, num_dims, num_senses, nthreads())
@@ -171,23 +172,25 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @inbounds nodes, _ = paths[context[i]]
         @inbounds union!(nodeset[tid], nodes)
       end
-      @inbounds nodevec = collect(nodeset[tid]) # TODO move this to dataset creation!
+      @inbounds nodevec = collect(nodeset[tid]) # TODO move this stuff to dataset creation! should boost performance by ~2%
       @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec)
       @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
       @inbounds @views sigmoid!(output[:, nodevec, tid])
       @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
-      η = 0.0025f0 * (1 - (epoch + (j - 1) / length(training_data)) / epochs)
+      η = 0.0025f0 * (1.0f0 - (epoch + j / length(training_data)) / epochs)
       ℓ = 0.0
-      for i in eachindex(context)
+      for i in eachindex(context) # total 88
         # TODO check gradient updates!
-        @inbounds nodes, decisions = paths[context[i]] # 4
-        @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid] # 10
-        @views @inbounds mul!(model.out[:, nodes], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η, 1.0f0) # 190
-        @views @inbounds mul!(∇h[:, :, tid], model.out[:, nodes], ζs[:, 1:length(nodes), tid]', η, 0.0f0) # 180
-        @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid]) # 35
-        @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid]) # 11
+        @inbounds nodes, decisions = paths[context[i]] # 3
+        @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid] # 6
+        @views @inbounds scratch_out[:, 1:length(nodes), tid] .= model.out[:, nodes]
+        @views @inbounds mul!(scratch_out[:, 1:length(nodes), tid], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η, 1.0f0) # 22
+        @views @inbounds mul!(∇h[:, :, tid], scratch_out[:, 1:length(nodes), tid], ζs[:, 1:length(nodes), tid]', η, 0.0f0) # 19
+        @views @inbounds model.out[:, nodes] .= scratch_out[:, 1:length(nodes), tid]
+        @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid]) # 9
+        @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid]) # 9
         @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid]) # 15
-        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid]) # 12
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid]) # 5
       end
       L += ℓ / length(context) # TODO only spot where there are any allocations
       @views @inbounds model.ns[:, word] .= (1.0f0 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
