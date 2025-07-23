@@ -12,25 +12,40 @@ include("./export.jl")
 
 const Filepath=String
 
+struct Settings
+  dims::Int64
+  senses::Int64
+  context::Int64
+  α::Float32
+  epochs::Int64
+  s_min::Int64
+  s_max::Int64
+  subword_truncation::Int64
+  η_1::Float32
+  η_2::Float32
+end
+
+function settings(dims::Int64=300, senses::Int64=10, context::Int64=8, α::Float32=0.1f0, epochs::Int64=5, s_min::Int64=4, s_max::Int64=7, subword_truncation::Int64=1_000_000, η_1::Float32=0.025f0, η_2::Float32=NaN32)
+  return Settings(dims, senses, context, α, epochs, s_min, s_max, subword_truncation, η_1, η_2)
+end
+
 function create_encodings(parameters::Filepath, output::Filepath)
+  create_encodings(parameters, output, settings())
+end
+
+function create_encodings(parameters::Filepath, output::Filepath, settings::Settings)
   @views @inbounds documents = readlines(parameters)
-  dims = 100
-  senses = 10
-  context = 8
-  subword_truncation = 1_000_000
-  s_min = 4
-  s_max = 7
-  settings = AdaSubGram.Model.settings(0.0f50, 5, 0.025f0, 0.05f0)
   tokenized_documents = Vector{Vector{String}}(undef, size(documents))
   @threads for i in eachindex(documents)
     @inbounds tokenized_documents[i] = AdaSubGram.Preprocessing.tokenize(AdaSubGram.Preprocessing.normalize(documents[i]))
   end
-  dataset, counts, labels = AdaSubGram.Dataset.create_dataset(tokenized_documents, context, s_min, s_max, UInt32(subword_truncation))
+  dataset, counts, labels = AdaSubGram.Dataset.create_dataset(tokenized_documents, settings.context, settings.s_min, settings.s_max, UInt32(settings.subword_truncation))
   nodes_decisions = AdaSubGram.HuffmanTree.huffman_paths(counts)
-  model = AdaSubGram.Model.initialize(dims, counts, subword_truncation, senses)
+  model = AdaSubGram.Model.initialize(settings.dims, counts, settings.subword_truncation, settings.senses)
   @inbounds max_nodes = maximum(length, nodes_decisions[1])
-  AdaSubGram.Model.train(model, dataset, nodes_decisions, settings, max_nodes)
-  @views AdaSubGram.Export.embeddings(output, labels, model.in_subwords, model.in_senses, s_min, s_max, UInt32(subword_truncation))
+  train_settings = AdaSubGram.Model.settings(settings.α, settings.epochs, settings.η_1, settings.η_2)
+  AdaSubGram.Model.train(model, dataset, nodes_decisions, train_settings, max_nodes)
+  @views AdaSubGram.Export.embeddings(output, labels, model.in_subwords, model.in_senses, settings.s_min, settings.s_max, UInt32(settings.subword_truncation))
 end
 
 export create_encodings

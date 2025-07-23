@@ -148,7 +148,7 @@ struct TrainSettings
   η_2::Float32
 end
 
-function settings(α::Float32=0.1f0, epochs::Int64=5, η_1::Float32=0.025f0, η_2::Float32=NaN)
+function settings(α::Float32=0.1f0, epochs::Int64=5, η_1::Float32=0.025f0, η_2::Float32=NaN32)
   return TrainSettings(α, epochs, η_1, isnan(η_2) ? 2.0f0 * η_1 : η_2)
 end
 
