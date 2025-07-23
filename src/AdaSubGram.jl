@@ -15,13 +15,12 @@ const Filepath=String
 function create_encodings(parameters::Filepath, output::Filepath)
   @views @inbounds documents = readlines(parameters)
   dims = 100
-  α = 0.05f0
   senses = 10
   context = 8
   subword_truncation = 1_000_000
   s_min = 4
   s_max = 7
-  epochs = 5
+  settings = AdaSubGram.Model.settings(0.0f50, 5, 0.025f0, 0.05f0)
   tokenized_documents = Vector{Vector{String}}(undef, size(documents))
   @threads for i in eachindex(documents)
     @inbounds tokenized_documents[i] = AdaSubGram.Preprocessing.tokenize(AdaSubGram.Preprocessing.normalize(documents[i]))
@@ -30,7 +29,7 @@ function create_encodings(parameters::Filepath, output::Filepath)
   nodes_decisions = AdaSubGram.HuffmanTree.huffman_paths(counts)
   model = AdaSubGram.Model.initialize(dims, counts, subword_truncation, senses)
   @inbounds max_nodes = maximum(length, nodes_decisions[1])
-  AdaSubGram.Model.train(model, dataset, nodes_decisions, epochs, α, max_nodes)
+  AdaSubGram.Model.train(model, dataset, nodes_decisions, settings, max_nodes)
   @views AdaSubGram.Export.embeddings(output, labels, model.in_subwords, model.in_senses, s_min, s_max, UInt32(subword_truncation))
 end
 

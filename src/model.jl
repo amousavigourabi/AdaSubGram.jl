@@ -141,8 +141,19 @@ function sense_likelihoods!(sense_likelihoods::T, as::T, bs::T, output::O, conte
   sense_likelihoods .*= sum_factor
 end
 
+struct TrainSettings
+  α::Float32
+  epochs::Float32
+  η_1::Float32
+  η_2::Float32
+end
+
+function settings(α::Float32=0.1f0, epochs::Int64=5, η_1::Float32=0.025f0, η_2::Float32=NaN)
+  return TrainSettings(α, epochs, η_1, isnan(η_2) ? 2.0f0 * η_1 : η_2)
+end
+
 # TODO split up train
-function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, epochs::Int64, α::Float32, max_nodes::Int64)
+function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, settings::TrainSettings, max_nodes::Int64)
   num_dims, num_senses, _ = size(model.in_senses)
   num_out = size(model.out, 2)
   # TODO move all these preallocated structures into a struct
@@ -162,7 +173,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
     @inbounds nodeset[i] = Set{Int32}()
   end
   println("Start at ", now())
-  for epoch in 0:(epochs-1)
+  for epoch in 0:(settings.epochs-1)
     L = 0.0
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
     @threads for (j, (word, subwords, context)) in dataset
@@ -176,9 +187,9 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec)
       @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
       @inbounds @views sigmoid!(output[:, nodevec, tid])
-      @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
-      η_1 = 0.05f0 * (1.0f0 - (epoch + j / length(training_data)) / epochs)
-      η_2 = 2 * η_1
+      @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, settings.α)
+      η_1 = settings.η_1 * (1.0f0 - (epoch + j / length(training_data)) / settings.epochs)
+      η_2 = settings.η_2 * (1.0f0 - (epoch + j / length(training_data)) / settings.epochs)
       ℓ = 0.0
       for i in eachindex(context)
         @inbounds nodes, decisions = paths[context[i]]
@@ -196,7 +207,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       @views @inbounds model.ns[:, word] .= (1.0f0 - η_2) .* model.ns[:, word] .+ η_2 .* model.word_counts[word] .* sense_likelihoods[:, tid]
     end
     L /= length(training_data)
-    println("Total training loss at epoch ", epoch+1, "/", epochs, ": ", L, " at ", now())
+    println("Total training loss at epoch ", epoch+1, "/", settings.epochs, ": ", L, " at ", now())
   end
 end
 
