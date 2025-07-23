@@ -143,7 +143,7 @@ end
 
 struct TrainSettings
   α::Float32
-  epochs::Float32
+  epochs::Int64
   η_1::Float32
   η_2::Float32
 end
