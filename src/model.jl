@@ -165,7 +165,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   for epoch in 0:(epochs-1)
     L = 0.0
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
-    @threads for (j, (word, subwords, context)) in dataset # TODO @threads calibration is poor at the start?
+    @threads for (j, (word, subwords, context)) in dataset
       tid = threadid()
       @inbounds empty!(nodeset[tid])
       for i in eachindex(context)
@@ -177,22 +177,21 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
       @inbounds @views sigmoid!(output[:, nodevec, tid])
       @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
-      η = 0.0025f0 * (1.0f0 - (epoch + j / length(training_data)) / epochs)
+      η = 0.025f0 * (1.0f0 - (epoch + j / length(training_data)) / epochs)
       ℓ = 0.0
-      for i in eachindex(context) # total 88
-        # TODO check gradient updates!
-        @inbounds nodes, decisions = paths[context[i]] # 3
-        @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid] # 6
+      for i in eachindex(context)
+        @inbounds nodes, decisions = paths[context[i]]
+        @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid]
         @views @inbounds scratch_out[:, 1:length(nodes), tid] .= model.out[:, nodes]
-        @views @inbounds mul!(scratch_out[:, 1:length(nodes), tid], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η, 1.0f0) # 22
-        @views @inbounds mul!(∇h[:, :, tid], scratch_out[:, 1:length(nodes), tid], ζs[:, 1:length(nodes), tid]', η, 0.0f0) # 19
+        @views @inbounds mul!(∇h[:, :, tid], scratch_out[:, 1:length(nodes), tid], ζs[:, 1:length(nodes), tid]', η / (1 + length(subwords)), 0.0f0)
+        @views @inbounds mul!(scratch_out[:, 1:length(nodes), tid], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η, 1.0f0)
         @views @inbounds model.out[:, nodes] .= scratch_out[:, 1:length(nodes), tid]
-        @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid]) # 9
-        @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid]) # 9
-        @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid]) # 15
-        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid]) # 5
+        @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid])
+        @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
+        @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid])
+        @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
-      L += ℓ / length(context) # TODO only spot where there are any allocations
+      L += ℓ / length(context)
       @views @inbounds model.ns[:, word] .= (1.0f0 - η) .* model.ns[:, word] .+ η .* model.word_counts[word] .* sense_likelihoods[:, tid]
     end
     L /= length(training_data)
