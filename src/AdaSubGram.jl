@@ -13,15 +13,15 @@ include("./export.jl")
 const Filepath=String
 
 function create_encodings(parameters::Filepath, output::Filepath)
-  @views @inbounds documents = readlines(parameters)[1:1000]
+  @views @inbounds documents = readlines(parameters)
   dims = 100
-  α = 0.1f0
+  α = 0.05f0
   senses = 10
   context = 8
   subword_truncation = 1_000_000
   s_min = 4
   s_max = 7
-  epochs = 10
+  epochs = 5
   tokenized_documents = Vector{Vector{String}}(undef, size(documents))
   @threads for i in eachindex(documents)
     @inbounds tokenized_documents[i] = AdaSubGram.Preprocessing.tokenize(AdaSubGram.Preprocessing.normalize(documents[i]))
