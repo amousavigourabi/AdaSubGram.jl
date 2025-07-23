@@ -174,6 +174,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       end
       @inbounds nodevec = collect(nodeset[tid]) # TODO move this stuff to dataset creation! should boost performance by ~2%
       @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec)
+      @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
       @inbounds @views sigmoid!(output[:, nodevec, tid])
       @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, α)
       η_1 = 0.05f0 * (1.0f0 - (epoch + j / length(training_data)) / epochs)
