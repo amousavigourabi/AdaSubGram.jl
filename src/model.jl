@@ -146,11 +146,10 @@ struct TrainSettings
   epochs::Int64
   η_1::Float32
   η_2::Float32
-  switch::Bool
 end
 
-function settings(α::Float32=0.1f0, epochs::Int64=5, η_1::Float32=0.025f0, η_2::Float32=NaN32, switch::Bool=false)
-  return TrainSettings(α, epochs, η_1, isnan(η_2) ? 2.0f0 * η_1 : η_2, switch)
+function settings(α::Float32=0.1f0, epochs::Int64=5, η_1::Float32=0.025f0, η_2::Float32=NaN32)
+  return TrainSettings(α, epochs, η_1, isnan(η_2) ? 2.0f0 * η_1 : η_2)
 end
 
 # TODO split up train
@@ -200,19 +199,13 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds scratch_out[:, 1:length(nodes), tid] .= model.out[:, nodes]
         @views @inbounds mul!(scratch_out[:, 1:length(nodes), tid], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η_1, 1.0f0)
         @views @inbounds model.out[:, nodes] .= scratch_out[:, 1:length(nodes), tid]
-        if epoch % 2 == 1 || settings.epochs < 2 || !settings.switch
-          @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid])
-        end
-        if epoch % 2 == 0 || !settings.switch
-          @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
-          @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid])
-        end
+        @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid])
+        @views @inbounds sum!(∇h_sum[:, tid], ∇h[:, :, tid])
+        @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid])
         @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
       L += ℓ / length(context)
-      if epoch > 0 || settings.epochs < 2 || !settings.switch
-        @views @inbounds model.ns[:, word] .= (1.0f0 - η_2) .* model.ns[:, word] .+ η_2 .* model.word_counts[word] .* sense_likelihoods[:, tid]
-      end
+      @views @inbounds model.ns[:, word] .= (1.0f0 - η_2) .* model.ns[:, word] .+ η_2 .* model.word_counts[word] .* sense_likelihoods[:, tid]
     end
     L /= length(training_data)
     println("Total training loss at epoch ", epoch+1, "/", settings.epochs, ": ", L, " at ", now())
