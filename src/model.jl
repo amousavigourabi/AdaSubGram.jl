@@ -209,7 +209,9 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
       L += ℓ / length(context)
-      @views @inbounds model.ns[:, word] .= (1.0f0 - η_2) .* model.ns[:, word] .+ η_2 .* model.word_counts[word] .* sense_likelihoods[:, tid]
+      if epoch > 0 || settings.epochs < 2
+        @views @inbounds model.ns[:, word] .= (1.0f0 - η_2) .* model.ns[:, word] .+ η_2 .* model.word_counts[word] .* sense_likelihoods[:, tid]
+      end
     end
     L /= length(training_data)
     println("Total training loss at epoch ", epoch+1, "/", settings.epochs, ": ", L, " at ", now())
