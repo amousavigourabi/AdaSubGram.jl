@@ -22,11 +22,11 @@ end
 #     output_dims = rand(50:200)
 #     output = rand(Float32, output_dims, num_senses)
 #     sense_likelihoods = zeros(Float32, num_senses)
-#     AdaSubGram.Model.sense_likelihoods!(sense_likelihoods)
+#     AdaSubGram.Model.sense_likelihoods!(sense_likelihoods, 0.5f0)
 #     @test 1 - ϵ < sum(sense_likelihoods) < 1 + ϵ
 #   end
 # end
 
 # @testset "HAHA" begin
-#   AdaSubGram.create_encodings("C:\\Users\\atour\\Downloads\\dataset.txt", "C:\\Users\\atour\\Downloads\\results.vec")
+#   AdaSubGram.create_encodings("C:\\Users\\atour\\Documents\\word-embeddings\\dataset.txt", "C:\\Users\\atour\\Downloads\\results.vec")
 # end
