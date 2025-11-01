@@ -173,7 +173,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
     @inbounds nodeset[i] = Set{Int32}()
   end
   println("Start at $(now()).")
-  # L = 0.0
+  L = 0.0
   for epoch in 0:(settings.epochs-1)
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
     @threads for (j, (word, subwords, context)) in dataset
@@ -194,8 +194,8 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
       for i in eachindex(context)
         @inbounds nodes, decisions = paths[context[i]]
         @views @inbounds ζs[:, 1:length(nodes), tid] .= (decisions' .- output[:, nodes, tid]) .* sense_likelihoods[:, tid]
-        @views @inbounds mul!(∇h[:, :, tid], scratch_out[:, 1:length(nodes), tid], ζs[:, 1:length(nodes), tid]', η_1 / (1 + length(subwords)), 0.0f0)
         @views @inbounds scratch_out[:, 1:length(nodes), tid] .= model.out[:, nodes]
+        @views @inbounds mul!(∇h[:, :, tid], scratch_out[:, 1:length(nodes), tid], ζs[:, 1:length(nodes), tid]', η_1 / (1 + length(subwords)), 0.0f0)
         @views @inbounds mul!(scratch_out[:, 1:length(nodes), tid], latent[:, :, tid], ζs[:, 1:length(nodes), tid], η_1, 1.0f0)
         @views @inbounds model.out[:, nodes] .= scratch_out[:, 1:length(nodes), tid]
         @views @inbounds add!(model.in_senses[:, :, word], ∇h[:, :, tid])
@@ -203,12 +203,12 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid])
         @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
-      # L += ℓ / length(context)
+      L += ℓ / length(context)
       @views @inbounds model.ns[:, word] .= (1.0f0 - η_2) .* model.ns[:, word] .+ η_2 .* model.word_counts[word] .* sense_likelihoods[:, tid]
     end
-    # L /= length(training_data)
+    L /= length(training_data)
     println("Finished epoch $(epoch + 1)/$(settings.epochs) at $(now()).")
-    # println("Total training loss at epoch ", epoch+1, "/", settings.epochs, ": ", L, " at ", now())
+    println("Total training loss at epoch ", epoch+1, "/", settings.epochs, ": ", L, " at ", now())
   end
   # GET FINAL LOSS
   L = 0.0
