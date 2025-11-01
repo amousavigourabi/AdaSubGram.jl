@@ -172,10 +172,9 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   for i in eachindex(nodeset)
     @inbounds nodeset[i] = Set{Int32}()
   end
-  println("Start at ", now())
-  L = 0.0
+  println("Start at $(now()).")
+  # L = 0.0
   for epoch in 0:(settings.epochs-1)
-    L = 0.0
     dataset = AdaSubGram.Dataset.shuffle!(training_data)
     @threads for (j, (word, subwords, context)) in dataset
       tid = threadid()
@@ -204,12 +203,36 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
         @views @inbounds add_all!(model.in_subwords[:, subwords], ∇h_sum[:, tid])
         @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
       end
-      L += ℓ / length(context)
+      # L += ℓ / length(context)
       @views @inbounds model.ns[:, word] .= (1.0f0 - η_2) .* model.ns[:, word] .+ η_2 .* model.word_counts[word] .* sense_likelihoods[:, tid]
     end
-    L /= length(training_data)
-    println("Total training loss at epoch ", epoch+1, "/", settings.epochs, ": ", L, " at ", now())
+    # L /= length(training_data)
+    println("Finished epoch $(epoch + 1)/$(settings.epochs) at $(now()).")
+    # println("Total training loss at epoch ", epoch+1, "/", settings.epochs, ": ", L, " at ", now())
   end
+  # GET FINAL LOSS
+  L = 0.0
+  @threads for (word, subwords, context) in training_data
+    tid = threadid()
+    @inbounds empty!(nodeset[tid])
+    for i in eachindex(context)
+      @inbounds nodes, _ = paths[context[i]]
+      @inbounds union!(nodeset[tid], nodes)
+    end
+    @inbounds nodevec = collect(nodeset[tid]) # TODO move this stuff to dataset creation! should boost performance by ~2%
+    @inbounds @views forward_pass!(model, word, subwords, latent[:, :, tid], output[:, :, tid], nodevec)
+    @inbounds @views clamp!(output[:, nodevec, tid], -16.0f0, 16.0f0)
+    @inbounds @views sigmoid!(output[:, nodevec, tid])
+    @inbounds @views sense_likelihoods!(sense_likelihoods[:, tid], as[:, tid], bs[:, tid], output[:, :, tid], context, paths, model.ns[:, word], bϝs[:, tid], num_senses, settings.α)
+    ℓ = 0.0
+    for i in eachindex(context)
+      @inbounds nodes, decisions = paths[context[i]]
+      @views @inbounds ℓ += AdaSubGram.HuffmanTree.hierarchical_softmax_loss(output[:, nodes, tid], decisions, sense_likelihoods[:, tid], sense_sums[:, tid])
+    end
+    L += ℓ / length(context)
+  end
+  L /= length(training_data)
+  println("Finished at $(now()), with a final training loss of $(L).")
   return L
 end
 
