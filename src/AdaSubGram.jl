@@ -9,6 +9,7 @@ include("./dataset.jl")
 include("./model.jl")
 include("./hierarchical_softmax.jl")
 include("./export.jl")
+include("./parser.jl")
 
 const Filepath=String
 
@@ -34,7 +35,7 @@ function create_encodings(input::Filepath, output::Filepath)
 end
 
 function create_encodings(input::Filepath, output::Filepath, settings::Settings)
-  documents = readlines(input)
+  documents = [AdaSubGram.Parser.parse(input)]
   tokenized_documents = Vector{Vector{String}}(undef, size(documents))
   @threads for i in eachindex(documents)
     @inbounds tokenized_documents[i] = AdaSubGram.Preprocessing.tokenize(AdaSubGram.Preprocessing.normalize(documents[i]))
@@ -42,7 +43,7 @@ function create_encodings(input::Filepath, output::Filepath, settings::Settings)
   dataset, counts, labels = AdaSubGram.Dataset.create_dataset(tokenized_documents, settings.context, settings.s_min, settings.s_max, UInt32(settings.subword_truncation))
   nodes_decisions = AdaSubGram.HuffmanTree.huffman_paths(counts)
   model = AdaSubGram.Model.initialize(settings.dims, counts, settings.subword_truncation, settings.senses)
-  @inbounds max_nodes = maximum(length, nodes_decisions[1])
+  @inbounds max_nodes = maximum(node_decision -> length(node_decision[1]), nodes_decisions)
   train_settings = AdaSubGram.Model.settings(settings.α, settings.epochs, settings.η_1, settings.η_2)
   final_loss = AdaSubGram.Model.train(model, dataset, nodes_decisions, train_settings, max_nodes)
   @views AdaSubGram.Export.embeddings(output, labels, model.in_subwords, model.in_senses, settings.s_min, settings.s_max, UInt32(settings.subword_truncation))
