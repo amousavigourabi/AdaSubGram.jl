@@ -34,7 +34,7 @@ function create_encodings(input::Filepath, output::Filepath)
 end
 
 function create_encodings(input::Filepath, output::Filepath, settings::Settings)
-  @views @inbounds documents = readlines(input)
+  documents = readlines(input)
   tokenized_documents = Vector{Vector{String}}(undef, size(documents))
   @threads for i in eachindex(documents)
     @inbounds tokenized_documents[i] = AdaSubGram.Preprocessing.tokenize(AdaSubGram.Preprocessing.normalize(documents[i]))
