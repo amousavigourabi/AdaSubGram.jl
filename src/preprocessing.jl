@@ -37,7 +37,7 @@ converting the character encodings to an equivalent
 NFC form, and making all characters lowercase.
 """
 function normalize(document::String)::String
-  return to_lowercase(normalize_encodings(remove_punctuation(document)))
+  return normalize_encodings(document)
 end
 
 """
@@ -50,6 +50,6 @@ function tokenize(document::String)::Vector{String}
   return split(document)
 end
 
-export normalize, tokenize
+export normalize, tokenize, to_lowercase, remove_punctuation
 
 end
