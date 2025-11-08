@@ -229,8 +229,8 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   println("Finished at $(now()), with a final training loss of $(L).")
   # DESTROY WHATEVER DOES NOT MAKE THE CUTOFF
   println("Cleaning up embedding space")
-  for sense in eachindex(model.ns, 1)
-    for word in eachindex(model.ns, 2)
+  for sense in axes(model.ns, 1)
+    for word in axes(model.ns, 2)
       if (model.word_counts[word] <= model.ns[sense, word] * cutoff)
         model.in_senses[:, sense, word] .= 0.0f0
       end
