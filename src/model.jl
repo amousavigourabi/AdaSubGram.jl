@@ -231,7 +231,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   println("Cleaning up embedding space")
   for sense in axes(model.ns, 1)
     for word in axes(model.ns, 2)
-      if (model.word_counts[word] <= model.ns[sense, word] * cutoff)
+      if (model.ns[sense, word] <= model.word_counts[word] * cutoff)
         model.in_senses[:, sense, word] .= 0.0f0
       end
     end
