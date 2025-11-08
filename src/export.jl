@@ -1,6 +1,7 @@
 module Export
 
 using AdaSubGram
+using LinearAlgebra
 
 const Filepath=String
 
@@ -24,6 +25,7 @@ function embeddings(output::Filepath, labels::Dict{String, UInt64}, subword_weig
           continue
         end
         @inbounds push!(exists_check, vectors[:, i])
+        vectors[:, i] ./= norm(vectors[:, i])
         @inbounds write(file, format_vector(vectors[:, i], word, i))
       end
     end
