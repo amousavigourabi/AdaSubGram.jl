@@ -15,8 +15,6 @@ end
 function embeddings(output::Filepath, labels::Dict{String, UInt64}, subword_weights::AbstractArray{Float32, 2}, sense_weights::AbstractArray{Float32, 3}, s_min::Int64, s_max::Int64, n::UInt32)
   failed_cutoff = 0
   open(output, "w") do file
-    dims, senses, _ = size(sense_weights)
-    @inbounds write(file, "$(length(labels)*senses) $dims\n")
     for (word, id) in labels
       vectors = get_vectors(id, AdaSubGram.Hashing.hash_words(AdaSubGram.Dataset.split_subwords(word, s_min, s_max), n), subword_weights, sense_weights)
       @inbounds for i in 1:size(vectors)[2]
