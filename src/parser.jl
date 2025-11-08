@@ -15,7 +15,6 @@ function parse(input::Filepath)::String
   collapse_whitespaces = [strip(replace(clear_punctuation, r"[ ]+" => " ")) for clear_punctuation in clear_punctuations]
   merged_yers = [replace(collapse_whitespace, r"&" => "\$") for collapse_whitespace in collapse_whitespaces]
   document = join(merged_yers, " ")
-  println("Contains $(count(==(' '), document) + 1) items.")
   return document
 end
 
