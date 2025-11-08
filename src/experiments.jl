@@ -17,6 +17,9 @@ function get_closest(handle::String, form::String)::Nothing
   compare_vector = encodings[form]
   minheap = MutableBinaryMinHeap{Tuple{Float32, String}, DataStructures.FasterForward}()
   for (label, vector) in encodings
+    if (label == form)
+      continue
+    end
     cosine_similarity = dot(vector, compare_vector)
     push!(minheap, (cosine_similarity, label))
   end
