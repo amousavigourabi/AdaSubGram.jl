@@ -17,11 +17,13 @@ function embeddings(output::Filepath, labels::Dict{String, UInt64}, subword_weig
   open(output, "w") do file
     for (word, id) in labels
       vectors = get_vectors(id, AdaSubGram.Hashing.hash_words(AdaSubGram.Dataset.split_subwords(word, s_min, s_max), n), subword_weights, sense_weights)
+      exists_check = Set{Vector{Float32}}()
       @inbounds for i in 1:size(vectors)[2]
-        @inbounds if (all(map(iszero, vectors[:, i])))
+        @inbounds if (vectors[:, i] ∈ exists_check || all(map(iszero, vectors[:, i])))
           failed_cutoff += 1
           continue
         end
+        @inbounds push!(exists_check, vectors[:, i])
         @inbounds write(file, format_vector(vectors[:, i], word, i))
       end
     end
