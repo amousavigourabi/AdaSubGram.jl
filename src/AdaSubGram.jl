@@ -10,6 +10,7 @@ include("./model.jl")
 include("./hierarchical_softmax.jl")
 include("./export.jl")
 include("./parser.jl")
+include("./import.jl")
 
 const Filepath=String
 
