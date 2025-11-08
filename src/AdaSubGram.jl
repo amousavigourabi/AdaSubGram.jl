@@ -27,7 +27,7 @@ struct Settings
   cutoff::Float32
 end
 
-function settings(dims::Int64=300, senses::Int64=10, context::Int64=8, α::Float32=0.15f0, epochs::Int64=3, s_min::Int64=4, s_max::Int64=7, subword_truncation::Int64=1_000_000, η_1::Float32=0.025f0, η_2::Float32=NaN32, cutoff::Float32=0.04f0)
+function settings(dims::Int64=200, senses::Int64=8, context::Int64=6, α::Float32=0.1f0, epochs::Int64=3, s_min::Int64=4, s_max::Int64=7, subword_truncation::Int64=1_000_000, η_1::Float32=0.025f0, η_2::Float32=NaN32, cutoff::Float32=0.05f0)
   return Settings(dims, senses, context, α, epochs, s_min, s_max, subword_truncation, η_1, η_2, cutoff)
 end
 
