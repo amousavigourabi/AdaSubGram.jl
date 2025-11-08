@@ -29,12 +29,12 @@ function settings(dims::Int64=300, senses::Int64=10, context::Int64=8, α::Float
   return Settings(dims, senses, context, α, epochs, s_min, s_max, subword_truncation, η_1, η_2)
 end
 
-function create_encodings(parameters::Filepath, output::Filepath)
-  create_encodings(parameters, output, settings())
+function create_encodings(input::Filepath, output::Filepath)
+  create_encodings(input, output, settings())
 end
 
-function create_encodings(parameters::Filepath, output::Filepath, settings::Settings)
-  @views @inbounds documents = readlines(parameters)
+function create_encodings(input::Filepath, output::Filepath, settings::Settings)
+  @views @inbounds documents = readlines(input)
   tokenized_documents = Vector{Vector{String}}(undef, size(documents))
   @threads for i in eachindex(documents)
     @inbounds tokenized_documents[i] = AdaSubGram.Preprocessing.tokenize(AdaSubGram.Preprocessing.normalize(documents[i]))
