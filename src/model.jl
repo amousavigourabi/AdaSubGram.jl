@@ -153,7 +153,7 @@ function settings(α::Float32=0.1f0, epochs::Int64=5, η_1::Float32=0.025f0, η_
 end
 
 # TODO split up train
-function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, settings::TrainSettings, max_nodes::Int64, cutoff::Float32)
+function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, settings::TrainSettings, max_nodes::Int64, cutoff::Float32, cutoff_abs::Float32)
   num_dims, num_senses, _ = size(model.in_senses)
   num_out = size(model.out, 2)
   # TODO move all these preallocated structures into a struct
@@ -231,7 +231,7 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   println("Cleaning up embedding space")
   for sense in axes(model.ns, 1)
     for word in axes(model.ns, 2)
-      if (model.ns[sense, word] <= max(model.word_counts[word] * cutoff, 1.0f0))
+      if (model.ns[sense, word] <= max(model.word_counts[word] * cutoff, cutoff_abs))
         model.in_senses[:, sense, word] .= 0.0f0
       end
     end

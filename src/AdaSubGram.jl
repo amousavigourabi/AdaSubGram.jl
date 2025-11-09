@@ -26,10 +26,11 @@ struct Settings
   η_1::Float32
   η_2::Float32
   cutoff::Float32
+  cutoff_abs::Float32
 end
 
-function settings(dims::Int64=200, senses::Int64=8, context::Int64=6, α::Float32=0.1f0, epochs::Int64=3, s_min::Int64=4, s_max::Int64=7, subword_truncation::Int64=1_000_000, η_1::Float32=0.025f0, η_2::Float32=NaN32, cutoff::Float32=0.05f0)
-  return Settings(dims, senses, context, α, epochs, s_min, s_max, subword_truncation, η_1, η_2, cutoff)
+function settings(dims::Int64=200, senses::Int64=5, context::Int64=8, α::Float32=0.1f0, epochs::Int64=3, s_min::Int64=4, s_max::Int64=7, subword_truncation::Int64=1_000_000, η_1::Float32=0.025f0, η_2::Float32=NaN32, cutoff::Float32=0.05f0, cutoff_abs::Float32=3.0f0)
+  return Settings(dims, senses, context, α, epochs, s_min, s_max, subword_truncation, η_1, η_2, cutoff, cutoff_abs)
 end
 
 function create_encodings(input::Filepath, output::Filepath)
@@ -47,7 +48,7 @@ function create_encodings(input::Filepath, output::Filepath, settings::Settings)
   model = AdaSubGram.Model.initialize(settings.dims, counts, settings.subword_truncation, settings.senses)
   @inbounds max_nodes = maximum(node_decision -> length(node_decision[1]), nodes_decisions)
   train_settings = AdaSubGram.Model.settings(settings.α, settings.epochs, settings.η_1, settings.η_2)
-  final_loss = AdaSubGram.Model.train(model, dataset, nodes_decisions, train_settings, max_nodes, settings.cutoff)
+  final_loss = AdaSubGram.Model.train(model, dataset, nodes_decisions, train_settings, max_nodes, settings.cutoff, settings.cutoff_abs)
   @views AdaSubGram.Export.embeddings(output, labels, model.in_subwords, model.in_senses, settings.s_min, settings.s_max, UInt32(settings.subword_truncation))
   return final_loss
 end
