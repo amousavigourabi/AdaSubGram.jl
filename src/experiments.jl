@@ -15,16 +15,16 @@ end
 function get_closest(handle::String, form::String)::Nothing
   encodings = AdaSubGram.Import.read_encodings("$(DATA)\\out\\$(handle).vec")
   compare_vector = encodings[form]
-  minheap = MutableBinaryMinHeap{Tuple{Float32, String}}()
+  maxheap = MutableBinaryMaxHeap{Tuple{Float32, String}}()
   for (label, vector) in encodings
     if (label == form)
       continue
     end
     cosine_similarity = dot(vector, compare_vector)
-    push!(minheap, (cosine_similarity, label))
+    push!(maxheap, (cosine_similarity, label))
   end
   for i in 1:10
-    println("$(i)th is $(pop!(minheap)[2]).")
+    println("$(i)th is $(pop!(maxheap)[2]).")
   end
 end
 
