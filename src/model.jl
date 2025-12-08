@@ -152,9 +152,18 @@ function settings(α::Float32=0.1f0, epochs::Int64=5, η_1::Float32=0.025f0, η_
   return TrainSettings(α, epochs, η_1, isnan(η_2) ? 2.0f0 * η_1 : η_2)
 end
 
+struct TrainResult
+  L::Float64
+  learned_vectors::Int64
+end
+
+function result(ℓ::Float64, learned_vectors::Int64)
+  return TrainResult(ℓ, learned_vectors)
+end
+
 # TODO split up train
 function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UInt32}, Vector{UInt64}}}, paths::Vector{Tuple{Vector{Int32}, Vector{Float32}}}, settings::TrainSettings, max_nodes::Int64, cutoff::Float32, cutoff_abs::Float32)
-  num_dims, num_senses, _ = size(model.in_senses)
+  num_dims, num_senses, num_words = size(model.in_senses)
   num_out = size(model.out, 2)
   # TODO move all these preallocated structures into a struct
   ζs = zeros(Float32, num_senses, max_nodes, nthreads())
@@ -229,16 +238,20 @@ function train(model::Parameters, training_data::Vector{Tuple{UInt64, Vector{UIn
   println("Finished at $(now()), with a final training loss of $(L).")
   # DESTROY WHATEVER DOES NOT MAKE THE CUTOFF
   println("Cleaning up embedding space")
+  failed_cutoff = 0
   for sense in axes(model.ns, 1)
     for word in axes(model.ns, 2)
       if (model.ns[sense, word] <= max(model.word_counts[word] * cutoff, cutoff_abs))
+        failed_cutoff += 1
         model.in_senses[:, sense, word] .= 0.0f0
       end
     end
   end
+  println("$(failed_cutoff) vectors were filtered out for not meeting the cutoff.")
+  learned_vectors = num_senses * num_words - failed_cutoff
   println("Done cleaning up embeddings at $(now()).")
   # END
-  return L
+  return result(L, learned_vectors)
 end
 
 end
