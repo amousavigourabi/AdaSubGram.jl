@@ -8,13 +8,13 @@ function read_encodings(file::Filepath)::Dict{String, Vector{Float32}}
   dictionary = Dict{String, Vector{Float32}}()
   first_line = true
   for line in eachline(file)
-    if (first_line)
+    if first_line
       first_line = false
       continue
     end
-    parts = split(line, " "; limit=2)
+    parts = split(line, " ")
     label = parts[1]
-    vector = parse.(Float32, split(parts[2]))
+    vector = parse.(Float32, parts[2:end])
     dictionary[label] = vector
   end
   return dictionary
