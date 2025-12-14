@@ -1,7 +1,7 @@
 name = "AdaSubGram"
 uuid = "39de99ea-98e8-4abf-a19e-a1c61e6261d6"
-authors = ["Atour Mousavi Gourabi"]
-version = "1.0.0-DEV"
+authors = ["Atour Mousavi Gourabi <amousavigourabi@gmail.com>"]
+version = "0.1.0"
 
 [deps]
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
